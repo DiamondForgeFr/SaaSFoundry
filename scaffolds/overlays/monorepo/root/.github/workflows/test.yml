@@ -2,10 +2,17 @@ name: Tests
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     branches: [{{CI_PR_BRANCHES}}]
+
+# Returning a PR to draft cancels the previous validation run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   install:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Install dependencies
     runs-on: ubuntu-latest
     steps:
@@ -35,6 +42,7 @@ jobs:
             ${{ runner.os }}-turbo-
 
   build:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Build affected packages
     needs: install
     runs-on: ubuntu-latest
@@ -75,6 +83,7 @@ jobs:
           key: ${{ runner.os }}-build-${{ hashFiles('**/package-lock.json') }}-${{ github.sha }}
 
   test-code-compliance:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Code compliance (Prettier / ESLint / Type Check)
     needs: build
     runs-on: ubuntu-latest
@@ -128,6 +137,7 @@ jobs:
         run: npm run format
 
   test-unit:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Unit tests
     needs: [build, test-code-compliance]
     runs-on: ubuntu-latest
@@ -157,6 +167,7 @@ jobs:
         run: npx turbo run test:unit --affected -- --passWithNoTests
 
   test-e2e-api:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: E2E tests (API)
     needs: [build, test-code-compliance]
     runs-on: ubuntu-latest
@@ -215,6 +226,7 @@ jobs:
         run: npx turbo run test:e2e --filter=*-api
 
   test-e2e-web:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: E2E tests (Web)
     needs: [build, test-code-compliance]
     runs-on: ubuntu-latest
