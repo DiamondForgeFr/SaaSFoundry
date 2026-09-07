@@ -1,4 +1,4 @@
-import { copy, move, remove } from 'fs-extra'
+import { copy, ensureDir, move, remove } from 'fs-extra'
 import { readFile, writeFile } from 'fs/promises'
 import { resolve } from 'path'
 
@@ -50,6 +50,14 @@ export async function installWorkflowSkill({ targetPath, workflow, projectUrl }:
     await move(`${targetSkillPath}/statuses-solo`, `${targetSkillPath}/statuses`)
   } else {
     await remove(`${targetSkillPath}/statuses-solo`)
+  }
+
+  // Install the trusted-base board listener only for GitHub Projects. Existing
+  // project workflows are user-owned and must never be overwritten on refresh.
+  if (workflow.tool === 'github-projects') {
+    const actionsDir = resolve(targetPath, '.github/workflows')
+    await ensureDir(actionsDir)
+    await copy(resolve(templatePath, 'github/pr-review-sync.yml'), resolve(actionsDir, 'pr-review-sync.yml'), { overwrite: false, errorOnExist: false })
   }
 
   // Replace placeholders in SKILL.md

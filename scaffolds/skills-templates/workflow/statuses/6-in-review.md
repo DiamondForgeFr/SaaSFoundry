@@ -38,7 +38,8 @@ Code review with mandatory green CI.
 
 - [ ] **Ready PR** — promote the approved draft using `workflow-cli.sh ready-pr <ticket>`. Internal tickets may use `create-pr <ticket>` directly. Keep the ticket link, change summary, test
       plan/results and created tests in its description; assign configured reviewers.
-- [ ] **Move ticket** to `In Review` via `workflow-cli.sh update-status`
+- [ ] **Confirm ticket** is `In Review`: the configured GitHub Ready for review listener performs the guarded transition automatically. If it is not installed, use `workflow-cli.sh update-status`.
+      Investigate listener errors instead of bypassing guards.
 - [ ] **Monitor CI** — readiness starts the complete applicable suite, and later non-draft pushes rerun it. Draft-skipped checks are not successful validation.
 - [ ] **Handle CI failures** — on red: analyze logs, fix, commit, push, wait for green
 - [ ] **Human retesting needed** — `workflow-cli.sh draft-pr <ticket>` explicitly returns the PR to draft and cancels obsolete CI under the configured policy; fix and rerun AI Testing before returning

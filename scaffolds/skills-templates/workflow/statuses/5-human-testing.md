@@ -53,7 +53,8 @@ In Review directly. See SKILL.md "Nature axis" section.
 - [ ] **Coverage** — main scenarios validated, edge cases identified, critical workflows
 - [ ] **Verify locally** — `npm run test:e2e` (or relevant runner) must be green
 - [ ] **Commit + push** — `test(#<N>): add E2E tests for <feature>` (pattern from `jq -r '.workflow.commitFormat.pattern' .saasfoundry.json`)
-- [ ] **Promote after tests are pushed** — `workflow-cli.sh ready-pr <ticket>`, then move to `In review`. The `ready_for_review` event starts full CI.
+- [ ] **Promote after tests are pushed** — `workflow-cli.sh ready-pr <ticket>`, then move to `In review`. The `ready_for_review` event starts full CI. When the configured GitHub review listener and
+      `SF_PROJECTS_TOKEN` are installed on the default branch, clicking **Ready for review** also moves the ticket to In review; otherwise run the guarded status transition manually.
 
 ## Errors to avoid
 

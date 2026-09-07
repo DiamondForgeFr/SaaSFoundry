@@ -1,0 +1,36 @@
+name: Sync PR review status
+
+on:
+  pull_request_target:
+    types: [ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-review-sync-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  sync-review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # pull_request_target supplies the trusted default-branch commit.
+      # Never check out the PR head or an arbitrary PR target branch.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Sync the linked ticket through the guarded workflow
+        env:
+          GH_TOKEN: ${{ secrets.SF_PROJECTS_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::Configure SF_PROJECTS_TOKEN with access to this repository and write access to its GitHub Project."
+            exit 1
+          fi
+          bash .claude/skills/sf-workflow/workflow-cli.sh sync-pr-review "$PR_NUMBER"

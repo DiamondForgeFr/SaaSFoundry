@@ -244,6 +244,22 @@ With the updated CI policy, draft PRs skip test/build CI. When adopting these sk
 external CI configuration or remove custom push hooks. Readiness and subsequent ready-PR pushes run full CI; returning to draft cancels obsolete runs. Quick commit checks remain enabled; heavy local
 validation belongs to AI Testing instead of every push.
 
+### GitHub Ready for review button
+
+For GitHub Projects, `.github/workflows/pr-review-sync.yml` listens to `ready_for_review` and calls `workflow-cli.sh sync-pr-review <PR>`. The button is the developer's approval to enter review; the
+job still enforces the workflow guards. The PR must close the ticket named by its configured feature/fix branch convention. Same-repository PRs are supported; fork PRs require the normal manual CLI
+transition.
+
+Configure the Actions secret `SF_PROJECTS_TOKEN` with access to the repository and write access to the configured organization Project (a dedicated token with `repo` and `project` scopes, or an
+equivalent appropriately scoped credential). The default `GITHUB_TOKEN` cannot access Projects. Never put credentials in the manifest or PR.
+
+The listener executes only trusted default-branch code, never PR code. Commit it to the default branch before expecting automatic updates; it cannot retroactively process clicks made before
+installation. A failed run caused by missing credentials can be rerun after configuration. Already-in-review tickets are unchanged, and stale events cannot advance a reverted PR. Missing linkage or
+invalid workflow state produces an actionable failure instead of bypassing guards.
+
+`installWorkflowSkill` deposits the listener for GitHub Projects while preserving an existing file with the same name. When adopting it into an existing project, compare the checked-in listener with
+`scaffolds/skills-templates/workflow/github/pr-review-sync.yml` in the CLI package; skill refresh alone does not replace customized Actions files.
+
 ## Workflow Statuses
 
 1. **Backlog** (GRAY) — Read `statuses/1-backlog.md` for full description

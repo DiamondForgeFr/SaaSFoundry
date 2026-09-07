@@ -525,9 +525,18 @@ check_pr_existence_guard() {
   payload=$(gh pr list --state open --limit 1000 --json number,headRefName,isDraft 2>/dev/null) || {
     echo "Error: unable to verify PR state; no status transition was made." >&2; return 1;
   }
-  matches=$(echo "$payload" | jq -ce --arg t "$ticket" '
-    if type == "array" then [.[] | select(.headRefName | test("^(feature|fix)/" + $t + "(-|$)"))]
-    else error("Expected PR array") end') || {
+  matches=$(echo "$payload" | jq -ce --arg t "$ticket" --slurpfile manifest .saasfoundry.json '
+    def literal:
+      explode | map(. as $c | if [92,46,94,36,124,63,42,43,40,41,91,93,123,125] | index($c)
+        then [92,$c] else [$c] end) | flatten | implode;
+    . as $payload
+    | [$manifest[0].workflow.branchNaming.feature // "feature/{N}-{description}",
+       $manifest[0].workflow.branchNaming.fix // "fix/{N}-{description}"]
+    | map(select(type == "string") | split("{N}") | select(length == 2) | join($t)
+      | split("{description}") | map(literal) | join(".+") | "^" + . + "$") as $patterns
+    | if ($payload | type) == "array" then
+        [$payload[] | select(.headRefName as $branch | any($patterns[]; . as $pattern | $branch | test($pattern)))]
+      else error("Expected PR array") end') || {
     echo "Error: invalid PR response; no status transition was made." >&2; return 1;
   }
   count=$(echo "$matches" | jq length)
@@ -617,10 +626,121 @@ show_next_status() {
 }
 
 # Main command dispatcher
+# Ready-for-review events run from the trusted base checkout, never PR code.
+# The branch convention identifies the only ticket eligible for synchronization;
+# GitHub's live native issue references confirm the association independently.
+sync_pr_review() {
+  if [[ "$#" -ne 1 || ! "$1" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Usage: workflow-cli.sh sync-pr-review <pr-number>" >&2
+    return 2
+  fi
+  local pr_number=$1 repo=${GITHUB_REPOSITORY:-} event_path=${GITHUB_EVENT_PATH:-}
+  if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ || ! -f "$event_path" ]]; then
+    echo "Error: sync-pr-review requires GITHUB_REPOSITORY and a ready_for_review GITHUB_EVENT_PATH." >&2
+    return 2
+  fi
+  load_config
+  [[ "$WORKFLOW_TOOL" == github-projects ]] || { echo "Error: review synchronization requires github-projects." >&2; return 2; }
+  local event live target_branch
+  target_branch=$(jq -er '.workflow.prTargetBranch // .workflow.workingBranch // "develop"' .saasfoundry.json) || return 2
+  event=$(jq -ce --arg repo "$repo" --argjson n "$pr_number" --arg base "$target_branch" '
+    select(.action == "ready_for_review" and .number == $n and .repository.full_name == $repo)
+    | .pull_request
+    | select(.number == $n and .state == "open" and .draft == false
+      and .base.repo.full_name == $repo and .head.repo.full_name == $repo and .base.ref == $base)
+    | select((.head.ref | type) == "string" and (.head.sha | test("^[0-9a-f]{40}$"))
+      and (.base.sha | test("^[0-9a-f]{40}$")))
+    | {number, head: .head.ref, headSha: .head.sha, base: .base.ref, baseSha: .base.sha}
+  ' "$event_path" 2>/dev/null) || {
+    echo "Error: event is malformed, stale, cross-repository or not ready_for_review; no ticket changed." >&2
+    return 2
+  }
+  live=$(gh pr view "$pr_number" --repo "$repo" --json number,url,state,isDraft,headRefName,headRefOid,baseRefName,baseRefOid,headRepository,headRepositoryOwner,isCrossRepository,closingIssuesReferences 2>/dev/null) || {
+    echo "Error: unable to fetch live PR metadata; no ticket changed." >&2; return 2;
+  }
+  if ! echo "$live" | jq -e '
+    (.number | type) == "number" and (.state == "OPEN" or .state == "CLOSED" or .state == "MERGED")
+    and (.isDraft | type) == "boolean" and (.isCrossRepository | type) == "boolean"
+    and (.headRefName | type) == "string" and (.baseRefName | type) == "string"
+    and (.headRefOid | test("^[0-9a-f]{40}$")) and (.baseRefOid | test("^[0-9a-f]{40}$"))
+    and (.headRepositoryOwner.login | type) == "string" and (.headRepository.name | type) == "string"
+    and (.closingIssuesReferences | type) == "array"
+  ' >/dev/null 2>&1; then
+    echo "Error: malformed live PR metadata; no ticket changed." >&2
+    return 2
+  fi
+  if ! echo "$live" | jq -e --argjson event "$event" --arg repo "$repo" '
+    .number == $event.number and .state == "OPEN" and .isDraft == false and .isCrossRepository == false
+    and .headRefName == $event.head and .baseRefName == $event.base
+    and ((.headRepositoryOwner.login + "/" + .headRepository.name) == $repo)
+    and (.closingIssuesReferences | type) == "array"
+  ' >/dev/null 2>&1; then
+    echo "Skipped stale ready event: live PR state, repository or target branch changed; no ticket changed."
+    return 0
+  fi
+  local ticket
+  ticket=$(jq -er --arg branch "$(echo "$live" | jq -r .headRefName)" '
+    def literal:
+      explode | map(. as $c | if [92,46,94,36,124,63,42,43,40,41,91,93,123,125] | index($c)
+        then [92,$c] else [$c] end) | flatten | implode;
+    def pattern_piece: split("{description}") | map(literal) | join(".+");
+    [.workflow.branchNaming.feature // "feature/{N}-{description}",
+     .workflow.branchNaming.fix // "fix/{N}-{description}"]
+    | map(select(type == "string") | split("{N}") | select(length == 2)
+      | "^" + (.[0] | pattern_piece) + "(?<ticket>[1-9][0-9]*)" + (.[1] | pattern_piece) + "$")
+    | [.[] as $pattern | $branch | try capture($pattern).ticket catch empty]
+    | unique | if length == 1 then .[0] else error("Ambiguous ticket branch") end
+  ' .saasfoundry.json 2>/dev/null) || {
+    echo "Error: PR branch does not identify one ticket under the configured naming patterns." >&2; return 2;
+  }
+  local server=${GITHUB_SERVER_URL:-https://github.com}
+  if ! echo "$live" | jq -e --argjson n "$ticket" --arg url "${server%/}/${repo}/issues/${ticket}" '
+    any(.closingIssuesReferences[]; .number == $n and .url == $url)
+  ' >/dev/null 2>&1; then
+    echo "Error: PR has no verified native closing reference to ticket #${ticket}; no ticket changed." >&2
+    return 2
+  fi
+  local status labels nature GH_REPO="$repo"
+  export GH_REPO
+  status=$(get_current_status "$ticket") || return 2
+  case "$(status_slug "$status")" in
+    in-review|done)
+      echo "Ticket #${ticket} is already ${status}; nothing to synchronize."
+      return 0
+      ;;
+    human-testing|ai-testing) ;;
+    *) echo "Error: ticket #${ticket} is not awaiting review (${status:-unknown}); no ticket changed." >&2; return 2 ;;
+  esac
+  # Unlike interactive legacy guards, this privileged event path must never
+  # infer permission from unavailable labels or inherited bypass flags.
+  labels=$(route_to_tool "$WORKFLOW_TOOL" get-labels "$ticket") || {
+    echo "Error: unable to verify ticket labels; no ticket changed." >&2; return 2;
+  }
+  if echo "$labels" | grep -Eq '^srs:|^nature:bundled-pr$' || ! echo "$labels" | grep -Eq '^complexity: (bug|low|medium|complex)$'; then
+    echo "Error: ticket labels do not permit the code review lifecycle." >&2
+    return 2
+  fi
+  nature=$(echo "$labels" | sed -n 's/^nature://p')
+  if [[ "$(status_slug "$status")" == ai-testing ]] && status_in_sequence "Human Testing" && [[ "$nature" != internal ]]; then
+    echo "Error: Human Testing approval is required before synchronizing review." >&2
+    return 2
+  fi
+  # The normal workflow command owns mutations and all status guards.
+  (
+    unset SF_WORKFLOW_BYPASS_NATURE_GUARD SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD SF_WORKFLOW_BYPASS_COMPLEXITY_GUARD SF_WORKFLOW_BYPASS_SRS_GUARD
+    export GH_REPO="$repo"
+    bash "$SKILL_DIR/workflow-cli.sh" update-status "$ticket" "In review"
+  )
+}
+
 COMMAND=$1
 shift || true
 
 case "$COMMAND" in
+  sync-pr-review)
+    sync_pr_review "$@"
+    exit $?
+    ;;
   # Workflow status commands
   status)
     TICKET=$1
@@ -1002,6 +1122,7 @@ case "$COMMAND" in
     echo "  update-status ...            Update ticket status (SRS-label guarded)"
     echo "  create-pr <ticket> [--draft]  Create pull request"
     echo "  ready-pr <ticket>            Mark pull request ready for review"
+    echo "  sync-pr-review <pr>          Sync a verified GitHub ready event to In review"
     echo "  draft-pr <ticket>            Return pull request to draft"
     echo "  list ...                     List tickets"
     echo "  get-labels <ticket>          List every label on a ticket"
@@ -1011,7 +1132,7 @@ case "$COMMAND" in
   *)
     echo -e "${RED}Error: Unknown command '${COMMAND}'${NC}"
     echo ""
-    echo "Available commands: status, next, validate, help, detect-complexity, retag, prepare, test, create-subtask, update-status, create-pr, ready-pr, draft-pr, list, get-labels, transition-drafting"
+    echo "Available commands: status, next, validate, help, detect-complexity, retag, prepare, test, create-subtask, update-status, create-pr, ready-pr, draft-pr, sync-pr-review, list, get-labels, transition-drafting"
     echo "Run 'workflow-cli.sh help' for usage details"
     exit 1
     ;;
