@@ -75,7 +75,7 @@ aiInstructions: |
   - Create unit tests for business logic
   - Create E2E tests for user workflows
   - Run tests until all green
-  - Commit tests before PR
+  - Commit tests before marking PR ready for review
 
   **Save Mode:**
   - If enabled, save all outputs to .claude/output/workflow/{ticket-id}/

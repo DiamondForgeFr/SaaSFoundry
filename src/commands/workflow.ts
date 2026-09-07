@@ -291,7 +291,7 @@ async function setAIRules(manifest: SaaSFoundryManifest) {
           checked: current.autoUpdateTicketStatus
         },
         {
-          name: 'Require human validation before creating PR',
+          name: 'Require human validation before marking PR ready for review',
           value: 'requireHumanCheckOnPushedBranch',
           checked: current.requireHumanCheckOnPushedBranch
         }

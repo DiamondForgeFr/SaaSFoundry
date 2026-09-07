@@ -30,11 +30,12 @@ all three surfaces (`srs`, `tickets`, `codeComments`).
 
 - **Statuses**: `Backlog → Ready → In progress → AI testing → Human testing → In review → Done`
 - **Before any status transition**: read `.claude/skills/sf-workflow/statuses/<N>-<name>.md` for mandatory actions and exit conditions
-- **Never skip statuses.** In particular: never go Backlog → AI Testing, never create a PR before Human Testing validation (unless ticket carries `nature:internal`), never mark Done before the PR is
-  merged
+- **Never skip statuses.** In particular: never go Backlog → AI Testing, open a draft PR for Human Testing and never mark it ready before human validation (unless ticket carries `nature:internal`),
+  never mark Done before the PR is merged
 - **Nature axis (Human Testing optionality)** — `nature:internal` tickets (refactor / scaffolding / non-terminal stories of an Epic) may transition AI Testing → In Review directly. Default (no label
   or `nature:user-facing`) requires Human Testing. The `update-status` guard enforces this — see `.claude/skills/sf-workflow/SKILL.md` "Nature axis" section.
 - **Never bypass the CLI**: use `.claude/skills/sf-workflow/workflow-cli.sh` and `.claude/skills/sf-tool-github-projects/github-projects-cli.sh` — not raw `gh api graphql` mutations
+- **Heavy validation before Human Testing:** run `npm run test:pre-push` explicitly during AI Testing and record the result. Iterative pushes do not run Docker.
 - **Commit + push BEFORE moving to AI Testing.** Code must be on remote before any testing phase.
 - **Subtasks must be real GitHub issues** (not checkboxes), created via `.claude/skills/sf-tool-github-projects/github-projects-cli.sh create-subtask`
 
@@ -108,7 +109,7 @@ scripts/              # Version management (tag-manager.sh)
 - `npm run format` — Prettier
 - `npm run lint` — ESLint
 - `npm run test:pre-commit` — Format + Lint + Type-check + Jest tests (runs on pre-commit, ~15s)
-- `npm run test:pre-push` — Top 2 Docker scenarios (runs on pre-push for non-RC branches, ~2-3 min)
+- `npm run test:pre-push` — Top 2 Docker scenarios (run explicitly during AI Testing before Human Testing, ~2-3 min)
 - `npm run test:full` — Alias: `test:pre-commit` + `test:pre-push` (full local validation)
 - `npm run test:docker` — All Docker scenarios (~70 min; `test:docker:list` prints the current set, `--count` the number)
 - `npm run test:docker -- --count N` — Top N priority scenarios
@@ -124,7 +125,7 @@ scripts/              # Version management (tag-manager.sh)
 - Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build, revert
 - Scope (ticket number) is required by commitlint
 - Max header length: 100 characters
-- Husky enforces commit format and pre-push checks
+- Husky enforces commit format and local commit checks; heavy Docker validation runs explicitly during AI Testing
 - RC branches (`rc-*`) trigger automated version management
 
 ## Code Conventions

@@ -99,7 +99,7 @@ aiInstructions: |
   - E2E tests for all user workflows
   - Regression tests for edge cases
   - Run until ALL tests pass
-  - Commit tests before PR
+  - Commit tests before marking PR ready for review
 
   **Save Mode:**
   - ALWAYS save outputs to .claude/output/workflow/{ticket-id}/

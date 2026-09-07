@@ -23,6 +23,7 @@ interface SandboxOptions {
   ghExitCode?: number
   natureLabel?: 'internal' | 'user-facing' | 'bundled-pr' | null
   currentStatus?: string
+  issueType?: string
 }
 
 async function buildSandbox(
@@ -95,6 +96,9 @@ if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   printf '%s' '${escaped}'
   exit 0
 fi
+if [ \"$1\" = api ]; then
+  printf '%s' '{\"data\":{\"repository\":{\"issue\":{\"issueType\":{\"name\":\"${options.issueType ?? 'sf-story'}\"}}}}}'
+fi
 exit 0
 `
   const ghPath = path.join(binDir, 'gh')
@@ -138,7 +142,7 @@ describe('sf-workflow CLI — PR-existence guard (→ In Review)', () => {
   })
 
   it('blocks "In review" when no open PR matches the ticket branch', async () => {
-    sandbox = await buildSandbox('[{"number":999,"headRefName":"feature/77-other-ticket"}]', { natureLabel: 'internal' })
+    sandbox = await buildSandbox('[{"number":999,"isDraft":false,"headRefName":"feature/77-other-ticket"}]', { natureLabel: 'internal' })
     const res = await runCli(['update-status', '42', 'In review'], sandbox)
     expect(res.code).toBe(2)
     expect(res.stderr).toContain('has no open PR')
@@ -156,7 +160,7 @@ describe('sf-workflow CLI — PR-existence guard (→ In Review)', () => {
   })
 
   it('allows "In review" when a matching open PR exists (feature/<N>-…)', async () => {
-    sandbox = await buildSandbox('[{"number":555,"headRefName":"feature/42-add-stuff"}]', { natureLabel: 'internal' })
+    sandbox = await buildSandbox('[{"number":555,"isDraft":false,"headRefName":"feature/42-add-stuff"}]', { natureLabel: 'internal' })
     const res = await runCli(['update-status', '42', 'In review'], sandbox)
     expect(res.code).toBe(0)
     const toolCalls = readLog(sandbox.toolLogPath).filter((l) => l.startsWith('update-status'))
@@ -164,7 +168,7 @@ describe('sf-workflow CLI — PR-existence guard (→ In Review)', () => {
   })
 
   it('allows "In review" when a matching open PR exists (fix/<N>-…)', async () => {
-    sandbox = await buildSandbox('[{"number":556,"headRefName":"fix/42-broken"}]', { natureLabel: 'internal' })
+    sandbox = await buildSandbox('[{"number":556,"isDraft":false,"headRefName":"fix/42-broken"}]', { natureLabel: 'internal' })
     const res = await runCli(['update-status', '42', 'In review'], sandbox)
     expect(res.code).toBe(0)
   })
@@ -192,14 +196,45 @@ describe('sf-workflow CLI — PR-existence guard (→ In Review)', () => {
     expect(toolCalls).toHaveLength(1)
   })
 
-  it('fails open when gh errors (offline / auth issue) — better to allow than to wedge', async () => {
+  it('fails closed when gh errors (offline / auth issue)', async () => {
     sandbox = await buildSandbox('', { ghExitCode: 1, natureLabel: 'internal' })
     const res = await runCli(['update-status', '42', 'In review'], sandbox)
-    expect(res.code).toBe(0)
+    expect(res.code).toBe(2)
+  })
+
+  it.each([
+    ['Human testing', true, 0],
+    ['Human testing', false, 2],
+    ['In review', true, 2],
+    ['In review', false, 0]
+  ])('requires the correct PR state for %s (draft=%s)', async (target, draft, code) => {
+    sandbox = await buildSandbox(JSON.stringify([{ number: 555, headRefName: 'feature/42-work', isDraft: draft }]), { currentStatus: 'Human testing' })
+    const res = await runCli(['update-status', '42', String(target)], sandbox)
+    expect(res.code).toBe(code)
+  })
+
+  it.each(['[{"number":555,"headRefName":"feature/42-work"}]', '[{"number":555,"headRefName":"feature/42-work","isDraft":false},{"number":556,"headRefName":"fix/42-work","isDraft":false}]', '{}'])(
+    'rejects unknown or ambiguous PR state: %s',
+    async (payload) => {
+      sandbox = await buildSandbox(payload, { currentStatus: 'Human testing' })
+      const res = await runCli(['update-status', '42', 'In review'], sandbox)
+      expect(res.code).toBe(2)
+      expect(readLog(sandbox.toolLogPath).filter((l) => l.startsWith('update-status'))).toEqual([])
+    }
+  )
+
+  it('allows PR-less native Epic groupers to derive Human Testing', async () => {
+    sandbox = await buildSandbox('[]', { currentStatus: 'AI testing', issueType: 'sf-epic' })
+    expect((await runCli(['update-status', '42', 'Human testing'], sandbox)).code).toBe(0)
+  })
+
+  it('still verifies the draft state when an Epic has a delivery PR', async () => {
+    sandbox = await buildSandbox('[{"number":555,"headRefName":"feature/42-work","isDraft":false}]', { currentStatus: 'AI testing', issueType: 'sf-epic' })
+    expect((await runCli(['update-status', '42', 'Human testing'], sandbox)).code).toBe(2)
   })
 
   it('does not match a different ticket whose number is a prefix (4 vs 42)', async () => {
-    sandbox = await buildSandbox('[{"number":888,"headRefName":"feature/420-other"}]', { natureLabel: 'internal' })
+    sandbox = await buildSandbox('[{"number":888,"isDraft":false,"headRefName":"feature/420-other"}]', { natureLabel: 'internal' })
     const res = await runCli(['update-status', '42', 'In review'], sandbox)
     expect(res.code).toBe(2)
     expect(res.stderr).toContain('has no open PR')
@@ -237,7 +272,7 @@ describe('sf-workflow CLI — bundled-PR path (AI Testing → Done)', () => {
   })
 
   it('blocks bundled-pr ticket from entering In Review (must go to Done directly)', async () => {
-    sandbox = await buildSandbox('[{"number":555,"headRefName":"feature/42-stuff"}]', { natureLabel: 'bundled-pr' })
+    sandbox = await buildSandbox('[{"number":555,"isDraft":false,"headRefName":"feature/42-stuff"}]', { natureLabel: 'bundled-pr' })
     const res = await runCli(['update-status', '42', 'In review'], sandbox)
     expect(res.code).toBe(2)
     expect(res.stderr).toContain("'nature:bundled-pr'")

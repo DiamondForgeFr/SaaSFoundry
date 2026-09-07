@@ -60,7 +60,13 @@ esac
   writeFileSync(toolPath, toolShim)
   chmodSync(toolPath, 0o755)
 
-  const env: NodeJS.ProcessEnv = { ...process.env, PWD: dir }
+  // The solo path skips Human Testing but still requires a verified ready PR.
+  const binDir = path.join(dir, 'bin')
+  await mkdir(binDir, { recursive: true })
+  const ghPath = path.join(binDir, 'gh')
+  writeFileSync(ghPath, `#!/bin/bash\necho '[{"number":1,"headRefName":"feature/277-work","isDraft":false}]'\n`)
+  chmodSync(ghPath, 0o755)
+  const env: NodeJS.ProcessEnv = { ...process.env, PWD: dir, PATH: `${binDir}:${process.env.PATH}` }
   return { dir, env, cleanup: () => rm(dir, { recursive: true, force: true }) }
 }
 

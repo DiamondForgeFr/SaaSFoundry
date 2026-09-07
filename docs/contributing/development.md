@@ -77,7 +77,7 @@ sf new --project-name local-test --structure monorepo
 | `npm run test:integration`                                  | Just integration tests (filesystem builders, scaffolds, installers)                                                                                                            | When changing builders / installers                                                                                    |
 | `npm run test:e2e`                                          | E2E tests (CLI command surface)                                                                                                                                                | When changing command wiring                                                                                           |
 | `npm run test:pre-commit`                                   | `format` + `lint` + `build` + `test` — what Husky runs on every commit (~15s)                                                                                                  | Before pushing                                                                                                         |
-| `npm run test:pre-push`                                     | Top 2 Docker scenarios (`monorepo-minimal` + `multirepo-minimal`, ~2–3 min)                                                                                                    | Before opening a PR — Husky pre-push runs this                                                                         |
+| `npm run test:pre-push`                                     | Top 2 Docker scenarios (`monorepo-minimal` + `multirepo-minimal`, ~2–3 min)                                                                                                    | Explicitly during AI Testing before Human Testing; record the results                                                  |
 | `npm run test:full`                                         | `test:pre-commit` + `test:pre-push` — full local validation                                                                                                                    | Before declaring something done                                                                                        |
 | `npm run test:docker`                                       | All Docker scenarios (~70 min, see `--list`)                                                                                                                                   | When in doubt about a builder or installer change                                                                      |
 | `npm run test:docker:list`                                  | Lists every scenario without running them                                                                                                                                      | To pick a specific one                                                                                                 |
@@ -113,16 +113,19 @@ A `chore:` without a ticket is rejected. Use `chore(#000): ...` only for genuine
 
 Husky installs three hooks under `.husky/`:
 
-| Hook         | What it runs                                                                  | How to bypass                                                     |
-| ------------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `commit-msg` | `commitlint` — rejects commits that don't match the convention above          | Don't. Fix the message.                                           |
-| `pre-commit` | `npm run test:pre-commit` (format + lint + build + jest, ~15 s)               | `--no-verify` on `git commit`. Reserve for emergencies.           |
-| `pre-push`   | `npm run test:pre-push` on non-RC branches (top 2 Docker scenarios, ~2–3 min) | `--no-verify` on `git push`. Avoid — CI will catch it but slower. |
+| Hook         | What it runs                                                         | How to bypass                                                    |
+| ------------ | -------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `commit-msg` | `commitlint` — rejects commits that don't match the convention above | Don't. Fix the message.                                          |
+| `pre-commit` | `npm run test:pre-commit` (format + lint + build + jest, ~15 s)      | `--no-verify` on `git commit`. Reserve for emergencies.          |
+| `pre-push`   | RC version management and WIP checks; no automatic Docker run        | Keep enabled; run heavy validation explicitly during AI Testing. |
 
 If pre-commit reformats files (prettier), the commit aborts so you can stage the formatted result. **Do not amend** — `git add` the formatted files and create a new commit. The same rule appears in
 the workflow skill: pre-commit retries are the source of truth for "the commit didn't happen."
 
-RC branches (`rc-*`) skip the Docker pre-push because the full release pipeline runs in CI.
+RC branches (`rc-*`) retain version management. Ordinary pushes do not repeat Docker builds. Run `npm run test:pre-push` during AI Testing before opening the Human Testing draft PR.
+
+Draft PRs provide the diff and manual test plan without running test/build CI. After human approval, push the required non-regression tests and use `workflow-cli.sh ready-pr <ticket>` to start full
+CI. Later ready-PR pushes rerun it; `draft-pr <ticket>` returns the PR to draft for further human testing and cancels obsolete CI.
 
 ## Migration framework — non-negotiable
 

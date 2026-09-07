@@ -37,6 +37,7 @@ case "$1" in
     echo "Sample ticket title"
     ;;
   pr)
+    if [ "$2" = "list" ]; then echo '[]'; exit 0; fi
     case "$GH_PR_CREATE_MODE" in
       ok)
         echo "https://github.com/FakeOrg/FakeRepo/pull/123"
