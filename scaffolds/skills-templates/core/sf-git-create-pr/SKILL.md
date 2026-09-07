@@ -16,6 +16,10 @@ Create pull request with concise, meaningful description.
 - Recent commits: !`git log --oneline -5`
 - Remote tracking: !`git rev-parse --abbrev-ref @{upstream} 2>/dev/null || echo "none"`
 
+## Configured SaaSFoundry workflow
+
+When `.saasfoundry.json` configures a workflow, read `sf-workflow` and use its guarded CLI: `create-pr <ticket> --draft` for Human Testing, then `ready-pr <ticket>` after approval and required tests. Internal/solo routes can create a ready PR directly. Follow configured branch names. The generic flow below only applies without a configured workflow.
+
 ## Workflow
 
 1. **Verify**: Check `git status` and current branch

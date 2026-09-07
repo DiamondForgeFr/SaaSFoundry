@@ -42,13 +42,16 @@ All via `.claude/skills/sf-tool-github-projects/github-projects-cli.sh <cmd> [ar
 | `get-complexity <ticket>`                | Read current complexity label                                                                     |
 | `get-labels <ticket>`                    | Print every label name, one per line (used by `sf-workflow` SRS guard)                            |
 | `get-ticket <ticket>`                    | Print title + body (used by `detect-complexity.sh`)                                               |
-| `create-pr <ticket>`                     | Push branch + open PR against `workingBranch`                                                     |
+| `create-pr <ticket> [--draft]`           | Push branch + open/reuse PR against `workingBranch`; preserve existing draft state                |
 | `list [status]`                          | List project items, optionally filtered by status                                                 |
 | `ensure-issue-types [--dry-run]`         | Idempotently create org-level issue types from `workflow.issueTypes` in `.saasfoundry.json`       |
 | `assign-type <issue> <type>`             | Attach a native GitHub Issue Type chip (sf-epic/sf-story/sf-task/sf-issue) to the issue           |
 | `delete-issue-type <type>`               | Remove an issue type from the org (cleanup of legacy types like Bug/Feature)                      |
 
 Status names are case-insensitive — the CLI matches against the options defined on the board.
+
+`ready-pr <ticket>` verifies the pushed branch and promotes its existing draft PR; retries are idempotent. Use it only after developer validation when Human Testing applies. `draft-pr <ticket>`
+explicitly returns a ready PR to draft for further human testing, with the same branch/head checks.
 
 ## How the orchestration skill uses this CLI
 
@@ -118,10 +121,12 @@ $CLI create-subtask 42 "Frontend UI"
 # 3. Status transitions (from the board, not labels)
 $CLI update-status 42 "In progress"
 $CLI update-status 42 "AI testing"
+$CLI create-pr 42 --draft
 $CLI update-status 42 "Human testing"
 
 # 4. PR + review + done
-$CLI create-pr 42
+# After human approval and non-regression tests are pushed:
+$CLI ready-pr 42
 $CLI update-status 42 "In review"
 # (after merge)
 $CLI update-status 42 "Done"

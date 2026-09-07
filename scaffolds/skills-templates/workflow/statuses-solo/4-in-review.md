@@ -5,7 +5,7 @@ banner_human: Review + merge the PR — this is the human gate of the solo workf
 complexity_profiles: [bug, low, medium, complex]
 entry_conditions:
   - AI Testing passed with the test report posted
-  - "**An open Pull Request exists for the ticket** (PR-existence guard — `In Review` without a PR is rejected by the CLI)"
+  - "**An open, non-draft Pull Request exists for the ticket** (PR-existence guard — `In Review` without a PR is rejected by the CLI)"
   - Ticket is **not** `nature:bundled-pr` — those go AI Testing → Done directly (no individual PR at this Sub level)
 mandatory_actions:
   - Create the Pull Request (title + description + test plan + test list + ticket link)
@@ -34,7 +34,7 @@ next_status: Done
 
 ## Action checklist
 
-- [ ] **Create the PR** — title = ticket title; description = ticket link + change summary + test plan (copy from ticket) + created tests; link PR to ticket
+- [ ] **Create a ready PR** — title = ticket title; description = ticket link + change summary + test plan (copy from ticket) + created tests; link PR to ticket
 - [ ] **Move ticket** to `In Review` via `workflow-cli.sh update-status`
 - [ ] **Monitor CI** — on red: analyze logs, fix, commit, push, wait for green
 - [ ] **Monitor the review** — answer questions, implement requested changes
@@ -55,3 +55,5 @@ next_status: Done
 > [!note] Convention sanity check
 >
 > This guard — and the `→ Done` PR-merged guard — only match when branches carry the ticket number, exactly the convention declared in `.saasfoundry.json` → `workflow.branchNaming` (`feature/{N}-{description}`, `fix/{N}-{description}`). The two must stay in lock-step. Quick check (should print `ok`): `echo "fix/32-detection-dropdown" | grep -Eq '^(feature|fix)/32(-|$)' && echo ok`. A branch missing the `{N}` ticket prefix (e.g. `fix/some-name`) silently fails the guard and forces `SF_WORKFLOW_BYPASS_*` on every ticket — realign `branchNaming`, never "fix" the regex. A non-regression test locks both sides together: `src/__tests__/unit/skill/branch-naming-pr-regex.spec.ts`.
+
+If a draft already exists, use `workflow-cli.sh ready-pr <ticket>` before entering In Review. Draft-skipped CI checks do not count as validation.

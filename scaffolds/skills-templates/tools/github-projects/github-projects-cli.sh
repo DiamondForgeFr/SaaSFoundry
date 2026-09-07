@@ -871,27 +871,65 @@ cmd_get_ticket() {
 # Command: create-pr
 # ───────────────────────────────────────────────────────────────────────────
 
-cmd_create_pr() {
-  if [ "$#" -lt 1 ]; then
-    echo "Usage: $0 create-pr <ticket-number>" >&2
-    exit 1
-  fi
-  TICKET_NUMBER=$1
+# Resolve only the current ticket branch. Never promote another developer's PR.
+pr_branch_context() {
+  local ticket=$1
+  [[ "$ticket" =~ ^[1-9][0-9]*$ ]] || { echo "Error: ticket must be a positive issue number." >&2; return 1; }
   load_config
-
-  echo -e "${YELLOW}Creating pull request for ticket #${TICKET_NUMBER}...${NC}"
-
-  CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-  if [ "$CURRENT_BRANCH" = "$WORKING_BRANCH" ]; then
-    echo -e "${RED}Error: Cannot create PR from working branch ${WORKING_BRANCH}${NC}"
-    exit 1
+  CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD) || return 1
+  local feature fix
+  feature=$(jq -r '.workflow.branchNaming.feature // "feature/{N}-{description}"' .saasfoundry.json)
+  fix=$(jq -r '.workflow.branchNaming.fix // "fix/{N}-{description}"' .saasfoundry.json)
+  feature=${feature//\{N\}/$ticket}
+  fix=${fix//\{N\}/$ticket}
+  feature=${feature//\{description\}/*}
+  fix=${fix//\{description\}/*}
+  if [[ "$CURRENT_BRANCH" == "$WORKING_BRANCH" || "$CURRENT_BRANCH" == "HEAD" ]] ||
+    { [[ "$CURRENT_BRANCH" != $feature ]] && [[ "$CURRENT_BRANCH" != $fix ]]; }; then
+    echo "Error: current branch does not match ticket #${ticket}'s configured branch naming." >&2
+    return 1
   fi
+}
 
-  ISSUE_TITLE=$(gh issue view "$TICKET_NUMBER" --json title --jq ".title" 2>/dev/null)
-  if [ -z "$ISSUE_TITLE" ]; then
-    echo -e "${RED}Error: Could not find issue #${TICKET_NUMBER}${NC}"
-    exit 1
+# Empty JSON array is a known absence; failed/malformed/ambiguous reads are errors.
+read_branch_pr() {
+  local payload
+  payload=$(gh pr list --head "$CURRENT_BRANCH" --state open --limit 100 --json number,url,headRefName,headRefOid,isDraft 2>/dev/null) || {
+    echo "Error: unable to read open PRs. Retry after restoring GitHub access." >&2; return 1;
+  }
+  BRANCH_PRS=$(echo "$payload" | jq -ce --arg branch "$CURRENT_BRANCH" '
+    if type != "array" then error("Expected PR array") else
+      [.[] | select(.headRefName == $branch)] end
+    | if length > 1 then error("Ambiguous PRs") else . end
+    | if all(.[]; (.number | type) == "number" and (.url | type) == "string"
+        and (.headRefOid | type) == "string" and (.isDraft | type) == "boolean")
+      then . else error("Incomplete PR state") end') || {
+    echo "Error: ambiguous or incomplete PR state for ${CURRENT_BRANCH}." >&2; return 1;
+  }
+}
+
+verify_pr_head() {
+  local pr_head
+  pr_head=$(echo "$BRANCH_PRS" | jq -r '.[0].headRefOid')
+  LOCAL_HEAD=$(git rev-parse HEAD) || return 1
+  REMOTE_HEAD=$(git ls-remote --heads origin "$CURRENT_BRANCH" 2>/dev/null | cut -f1) || return 1
+  if [[ -z "$REMOTE_HEAD" || "$LOCAL_HEAD" != "$REMOTE_HEAD" || "$pr_head" != "$LOCAL_HEAD" ]]; then
+    echo "Error: PR, local branch and remote head do not match. Push and retry before marking ready." >&2
+    return 1
   fi
+}
+
+cmd_create_pr() {
+  if [[ "$#" -lt 1 || "$#" -gt 2 || ( "$#" -eq 2 && "$2" != "--draft" ) ]]; then
+    echo "Usage: $0 create-pr <ticket-number> [--draft]" >&2
+    return 1
+  fi
+  local TICKET_NUMBER=$1
+  local draft_args=()
+  [[ "${2:-}" == "--draft" ]] && draft_args=(--draft)
+  pr_branch_context "$TICKET_NUMBER" || return 1
+  ISSUE_TITLE=$(gh issue view "$TICKET_NUMBER" --json title --jq ".title" 2>/dev/null) || return 1
+  [[ -n "$ISSUE_TITLE" ]] || { echo "Error: Could not find issue #${TICKET_NUMBER}" >&2; return 1; }
 
   # The push is read, and then confirmed.
   #
@@ -919,27 +957,61 @@ cmd_create_pr() {
     exit 1
   fi
 
-  # `|| status=$?` keeps `set -e` from killing the script mid-assignment — that
-  # silently swallowed gh's error message (captured in the substitution, never
-  # printed). Success requires exit 0 AND a real PR URL: gh error output often
-  # contains URLs (compare/doc links), so a bare `grep http` false-positives (#435).
-  PR_CREATE_STATUS=0
-  PR_OUTPUT=$(gh pr create \
-    --title "[#${TICKET_NUMBER}] $ISSUE_TITLE" \
-    --body "Resolves #${TICKET_NUMBER}" \
-    --base "$WORKING_BRANCH" 2>&1) || PR_CREATE_STATUS=$?
+  read_branch_pr || return 1
+  if [[ $(echo "$BRANCH_PRS" | jq length) -eq 1 ]]; then
+    verify_pr_head || return 1
+    echo "✓ Pull request already exists; its draft state was preserved."
+    echo "$BRANCH_PRS" | jq -r '.[0].url'
+    return 0
+  fi
 
+  local PR_CREATE_STATUS=0 PR_OUTPUT PR_URL
+  PR_OUTPUT=$(gh pr create --title "[#${TICKET_NUMBER}] $ISSUE_TITLE" \
+    --body "Resolves #${TICKET_NUMBER}" --base "$WORKING_BRANCH" "${draft_args[@]}" 2>&1) || PR_CREATE_STATUS=$?
   PR_URL=$(echo "$PR_OUTPUT" | grep -oE 'https://[^[:space:]]+/pull/[0-9]+' | head -n 1 || true)
-
-  if [ "$PR_CREATE_STATUS" -eq 0 ] && [ -n "$PR_URL" ]; then
+  if [[ "$PR_CREATE_STATUS" -eq 0 && -n "$PR_URL" ]]; then
     echo -e "${GREEN}✓ Pull request created${NC}"
     echo "$PR_URL"
   else
     echo -e "${RED}Error creating PR (gh exit ${PR_CREATE_STATUS}):${NC}"
     echo "$PR_OUTPUT"
-    exit 1
+    return 1
   fi
 }
+
+cmd_set_pr_draft() {
+  local desired_draft=$1 action=$2
+  shift 2
+  if [[ "$#" -ne 1 ]]; then
+    echo "Usage: $0 ${action}-pr <ticket-number>" >&2
+    return 1
+  fi
+  pr_branch_context "$1" || return 1
+  read_branch_pr || return 1
+  [[ $(echo "$BRANCH_PRS" | jq length) -eq 1 ]] || { echo "Error: no open PR for ticket #$1 on ${CURRENT_BRANCH}." >&2; return 1; }
+  verify_pr_head || return 1
+  local pr_number state_args=()
+  pr_number=$(echo "$BRANCH_PRS" | jq -r '.[0].number')
+  [[ "$desired_draft" == true ]] && state_args=(--undo)
+  if [[ $(echo "$BRANCH_PRS" | jq -r '.[0].isDraft') != "$desired_draft" ]]; then
+    gh pr ready "$pr_number" "${state_args[@]}" || { echo "Error: changing PR draft state failed." >&2; return 1; }
+    read_branch_pr || return 1
+    if ! echo "$BRANCH_PRS" | jq -e --argjson n "$pr_number" --argjson draft "$desired_draft" 'length == 1 and .[0].number == $n and .[0].isDraft == $draft' >/dev/null; then
+      echo "Error: PR draft state could not be confirmed. Retry after checking GitHub." >&2
+      return 1
+    fi
+    verify_pr_head || return 1
+  fi
+  if [[ "$desired_draft" == true ]]; then
+    echo "✓ Pull request #${pr_number} is a draft for Human Testing."
+  else
+    echo "✓ Pull request #${pr_number} is ready for review."
+  fi
+  echo "$BRANCH_PRS" | jq -r '.[0].url'
+}
+
+cmd_ready_pr() { cmd_set_pr_draft false ready "$@"; }
+cmd_draft_pr() { cmd_set_pr_draft true draft "$@"; }
 
 # ───────────────────────────────────────────────────────────────────────────
 # Command: list — list items on the project board, optionally filtered by status
@@ -1602,6 +1674,8 @@ case "$COMMAND" in
   get-labels)         cmd_get_labels "$@" ;;
   get-ticket)         cmd_get_ticket "$@" ;;
   create-pr)          cmd_create_pr "$@" ;;
+  ready-pr)           cmd_ready_pr "$@" ;;
+  draft-pr)           cmd_draft_pr "$@" ;;
   list)               cmd_list "$@" ;;
   cache-clear)        cmd_cache_clear "$@" ;;
   ensure-issue-types) cmd_ensure_issue_types "$@" ;;
@@ -1623,7 +1697,9 @@ case "$COMMAND" in
     echo "  get-complexity <ticket>                  Read current complexity label"
     echo "  get-labels <ticket>                      Print every label name (one per line)"
     echo "  get-ticket <ticket>                      Print title + body (for scripting)"
-    echo "  create-pr <ticket>                       Open PR for current branch"
+    echo "  create-pr <ticket> [--draft]             Open PR for current branch"
+    echo "  ready-pr <ticket>                        Mark the ticket PR ready for review"
+    echo "  draft-pr <ticket>                        Return the ticket PR to draft"
     echo "  list [status]                            List project items (optionally filtered)"
     echo "  milestone <sub> [args]                   create|list|show|scope|assign|associate|readiness"
     echo "  cache-clear                              Drop the on-disk schema cache"
@@ -1634,7 +1710,7 @@ case "$COMMAND" in
     ;;
   *)
     echo -e "${RED}Error: Unknown command '${COMMAND}'${NC}"
-    echo "Available: create-subtask, status, update-status, set-complexity, get-complexity, get-labels, get-ticket, create-pr, list, cache-clear, ensure-issue-types, assign-type, delete-issue-type"
+    echo "Available: create-subtask, status, update-status, set-complexity, get-complexity, get-labels, get-ticket, create-pr, ready-pr, draft-pr, list, cache-clear, ensure-issue-types, assign-type, delete-issue-type"
     exit 1
     ;;
 esac

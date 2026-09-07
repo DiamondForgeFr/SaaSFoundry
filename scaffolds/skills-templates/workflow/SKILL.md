@@ -37,7 +37,7 @@ Orthogonal to complexity. Controls whether **Human Testing** and **In Review** a
 **Guards** (all enforced by `update-status`):
 
 - **Nature guard** on `→ In Review` from `AI Testing` — requires `nature:internal`. `nature:bundled-pr` is rejected here (must go to `Done` instead). Default (no label / `user-facing`) must go through Human Testing first. Escape hatch: `SF_WORKFLOW_BYPASS_NATURE_GUARD=1`.
-- **PR-existence guard** on `→ In Review` — rejected when no open PR is found for the ticket (`In Review` without a PR is meaningless). Escape hatch: `SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD=1`.
+- **PR-state guard** — `→ Human Testing` requires an open draft PR; `→ In Review` requires an open non-draft PR. Unknown PR state blocks these transitions. Epic groupers without a PR keep their derived lifecycle. Escape hatch: `SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD=1`.
 - **Nature guard** on `→ Done` from `AI Testing` — allowed **only** for `nature:bundled-pr` (everyone else must go through `In Review` first). Escape hatch: `SF_WORKFLOW_BYPASS_NATURE_GUARD=1`.
 - **PR-merged guard** on `→ Done` — rejected when an open PR still exists for the ticket (`Done` means merged). Does not fire on `nature:bundled-pr` (no PR is expected). Escape hatch: `SF_WORKFLOW_BYPASS_PR_MERGED_GUARD=1`.
 
@@ -222,6 +222,12 @@ Typing the reason is the audit trail — pick something a reviewer can grep for 
 ### Conversational eval hook (SRS-enabled projects)
 
 When `tools.srs.enabled = true`, Claude must interject during conversation turns whose content looks like a new User Requirement / Functional Requirement / Design decision / Test Case, propose a diff, and on user accept apply it via `.claude/skills/sf-srs/scripts/srs-cli.sh apply-update`. The detection heuristics, confirmation flow, and scope limits (ADD-only in v1) live in the sf-srs SKILL.md — see its `## Conversational eval hook (SUB-10)` section. This skill only references it ; never duplicate the heuristics here.
+
+## Draft PR lifecycle
+
+After AI validation (including the configured heavy local suite), use `workflow-cli.sh create-pr <ticket> --draft` before Human Testing. Keep the test plan and results on that PR. After developer approval and required non-regression tests, push then use `workflow-cli.sh ready-pr <ticket>` before In Review. Creation retries reuse the existing PR without changing its draft state. Use `draft-pr <ticket>` explicitly when returning a ready PR to human retesting. Internal/solo routes may create a ready PR directly.
+
+With the updated CI policy, draft PRs skip test/build CI. When adopting these skills in an existing project, inspect its checked-in workflows and hooks: refreshing instructions alone does not update external CI configuration or remove custom push hooks. Readiness and subsequent ready-PR pushes run full CI; returning to draft cancels obsolete runs. Quick commit checks remain enabled; heavy local validation belongs to AI Testing instead of every push.
 
 ## Workflow Statuses
 

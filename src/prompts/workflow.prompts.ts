@@ -38,19 +38,19 @@ export const WORKFLOW_PRESETS = {
       {
         name: 'AI Testing',
         description:
-          'First validation phase. Execute the generated test plan step by step. For each test: verify functionality, check edge cases, validate against requirements. Document all findings in ticket comments. If issues found: fix them, commit changes, and re-test. When all tests pass: create test report summary and move to Human Testing for second validation.',
+          'First validation phase. Execute the generated test plan step by step. For each test: verify functionality, check edge cases, validate against requirements. Document all findings in ticket comments. If issues found: fix them, commit changes, and re-test. When all tests pass: post the test report, open a draft PR with the manual test plan and move to Human Testing. Heavy local validation must pass before this transition.',
         color: 'PURPLE' as GitHubProjectColor
       },
       {
         name: 'Human Testing',
         description:
-          'Second validation by human reviewer. Developer performs manual testing of functionality, validates edge cases, reviews UX/UI. If approved: AI creates pull request and moves to In Review. If major issues found: send back to In Progress with detailed feedback for fixes.',
+          'Human validation uses an open draft PR with the diff and test plan. Test/build CI is skipped while draft. After approval and non-regression tests, mark the same PR ready and move to In Review; full CI starts. On failure, fix and repeat AI Testing.',
         color: 'ORANGE' as GitHubProjectColor
       },
       {
         name: 'In Review',
         description:
-          'Pull request created and awaiting code review from team members. AI monitors review comments and addresses feedback if needed (make requested changes, answer questions, update documentation). When PR is approved by reviewers: merge to main branch and move to Done.',
+          'A non-draft pull request awaits code review with full CI. Address feedback and rerun checks after changes. After approval and green CI, wait for the developer to merge into the configured target branch before moving to Done.',
         color: 'PINK' as GitHubProjectColor
       },
       {
@@ -1201,7 +1201,7 @@ export async function promptWorkflowConfiguration(
             checked: true
           },
           {
-            name: 'Require human validation before creating PR (push → test → approval → PR)',
+            name: 'Require human validation before marking PR ready (test → draft PR → approval → ready)',
             value: 'requireHumanCheckOnPushedBranch',
             checked: true
           }

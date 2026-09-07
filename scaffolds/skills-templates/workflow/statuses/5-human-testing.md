@@ -6,6 +6,7 @@ complexity_profiles: [bug, low, medium, complex]
 entry_conditions:
   - All AI Testing steps passed
   - Test plan ready for human validation
+  - An open draft PR exists for the ticket, containing the test plan and AI test results
 mandatory_actions:
   - Wait for developer validation
   - On bug report — fix, commit, push, return to AI Testing
@@ -18,12 +19,12 @@ exit_conditions:
   - Non-regression tests created (when applicable)
   - Tests pass locally
   - Code with tests pushed
-next_status: In Review (create PR)
+next_status: In Review (promote the existing draft PR)
 ---
 
 # STATUS: Human Testing
 
-Manual validation by the developer, followed by non-regression test creation.
+Manual validation in a draft PR, followed by non-regression test creation and explicit promotion to review. Draft PR events skip test/build CI; a skipped check is not proof that tests passed.
 
 ## Applicability
 
@@ -39,6 +40,8 @@ In Review directly. See SKILL.md "Nature axis" section.
 
 ## Action checklist
 
+- [ ] **Draft PR** — reuse the PR opened at the end of AI Testing via `workflow-cli.sh create-pr <ticket> --draft`; keep its description, test plan and results current. Do not promote it before
+      developer approval.
 - [ ] **Wait for validation** — developer tests manually, you stay available to answer
 - [ ] **On bugs reported:**
   - Read the comments carefully, summarize the fix plan as a reply
@@ -50,9 +53,10 @@ In Review directly. See SKILL.md "Nature axis" section.
 - [ ] **Coverage** — main scenarios validated, edge cases identified, critical workflows
 - [ ] **Verify locally** — `npm run test:e2e` (or relevant runner) must be green
 - [ ] **Commit + push** — `test(#<N>): add E2E tests for <feature>` (pattern from `jq -r '.workflow.commitFormat.pattern' .saasfoundry.json`)
+- [ ] **Promote after tests are pushed** — `workflow-cli.sh ready-pr <ticket>`, then move to `In review`. The `ready_for_review` event starts full CI.
 
 ## Errors to avoid
 
 - Creating tests BEFORE developer validation
-- Creating a PR without non-regression coverage
+- Marking the draft PR ready before developer approval and the required non-regression coverage
 - Pushing failing tests

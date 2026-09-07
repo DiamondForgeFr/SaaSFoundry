@@ -504,48 +504,59 @@ check_pr_merged_guard() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────
-# PR-existence guard — In Review requires an open PR
-# ───────────────────────────────────────────────────────────────────────────
-#
-# Entering 'In Review' means a Pull Request exists and is awaiting review.
-# Without an open PR there is nothing to review and the status is a board
-# lie. The status doc (statuses/6-in-review.md) lists "Create the PR" as a
-# mandatory entry action — this guard codifies that contract.
-#
-# Tickets tagged `nature:bundled-pr` are blocked separately by the nature
-# guard (they should not enter In Review at all). Tickets without any nature
-# label or with `nature:internal`/`nature:user-facing` need a real PR here.
-#
-# Fail-open on `gh` fetch errors (offline / auth). Escape hatch:
-# SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD=1.
+# PR-state guard — Human Testing requires draft; In Review requires ready.
+# Unknown, malformed or ambiguous remote state fails closed. PR-less Epic
+# groupers are exempt; delivery Epics carrying a PR follow its draft state.
+# Escape hatch: SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD=1.
 
 check_pr_existence_guard() {
-  # Returns 0 if the caller may proceed, 1 if blocked (message printed).
-  local ticket=$1
-  local target=$2
-
+  local ticket=$1 target=$2 normalized
   [[ "${SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD:-}" == "1" ]] && return 0
-  is_in_review_target "$target" || return 0
-
-  local pr_number
-  pr_number=$(get_open_pr_for_ticket "$ticket") || return 0   # fail-open on fetch error
-
-  if [[ -z "$pr_number" ]]; then
-    echo -e "${RED}✗ Ticket #${ticket} has no open PR — cannot transition to 'In Review'.${NC}" >&2
-    echo "" >&2
-    echo "  'In Review' means a Pull Request is open and awaiting review." >&2
-    echo "  Without a PR there is nothing to review — the status would be a board lie." >&2
-    echo "" >&2
-    echo "  Open the PR first, then move the ticket:" >&2
-    echo "    .claude/skills/sf-workflow/workflow-cli.sh create-pr ${ticket}" >&2
-    echo "    .claude/skills/sf-workflow/workflow-cli.sh update-status ${ticket} 'In review'" >&2
-    echo "" >&2
-    echo "  If this Sub's PR is bundled at the parent Epic level, tag it bundled-pr" >&2
-    echo "  and move to Done directly when AI Testing passes:" >&2
-    echo "    gh issue edit ${ticket} --add-label 'nature:bundled-pr'" >&2
-    echo "    .claude/skills/sf-workflow/workflow-cli.sh update-status ${ticket} Done" >&2
-    echo "" >&2
+  normalized=$(echo "$target" | tr '[:upper:]' '[:lower:]' | awk '{$1=$1;print}')
+  [[ "$normalized" == "in review" || "$normalized" == "human testing" ]] || return 0
+  local nature payload matches count
+  nature=$(get_ticket_nature_label "$ticket") || {
+    echo "Error: unable to verify ticket nature before PR readiness transition." >&2; return 1;
+  }
+  if [[ "$nature" == "bundled-pr" ]]; then
+    echo "Error: nature:bundled-pr tickets cannot enter Human Testing or In Review; use AI Testing → Done." >&2
+    return 1
+  fi
+  payload=$(gh pr list --state open --limit 1000 --json number,headRefName,isDraft 2>/dev/null) || {
+    echo "Error: unable to verify PR state; no status transition was made." >&2; return 1;
+  }
+  matches=$(echo "$payload" | jq -ce --arg t "$ticket" '
+    if type == "array" then [.[] | select(.headRefName | test("^(feature|fix)/" + $t + "(-|$)"))]
+    else error("Expected PR array") end') || {
+    echo "Error: invalid PR response; no status transition was made." >&2; return 1;
+  }
+  count=$(echo "$matches" | jq length)
+  if [[ "$count" -eq 0 ]]; then
+    # Derived Epic groupers do not own PRs. Delivery Epics with a PR still
+    # follow the same draft/readiness contract as Stories.
+    local issue_type
+    issue_type=$(gh api graphql -F owner='{owner}' -F name='{repo}' -F number="$ticket" \
+      -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){issueType{name}}}}' 2>/dev/null \
+      | jq -er '.data.repository.issue.issueType.name // empty') || issue_type=""
+    [[ "$issue_type" == "sf-epic" ]] && return 0
+    echo "✗ Ticket #${ticket} has no open PR — cannot transition to '$(if [[ "$normalized" == 'in review' ]]; then echo 'In Review'; else echo 'Human Testing'; fi)'." >&2
+    echo "  Open a draft with workflow-cli.sh create-pr ${ticket} --draft for Human Testing." >&2
+    echo "  After approval, use workflow-cli.sh ready-pr ${ticket} before In Review." >&2
     echo "  Escape hatch (rare): SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD=1" >&2
+    return 1
+  fi
+  if [[ "$count" -ne 1 ]] || ! echo "$matches" | jq -e '.[0].isDraft | type == "boolean"' >/dev/null; then
+    echo "Error: ambiguous or unknown PR draft state; no status transition was made." >&2
+    return 1
+  fi
+  local draft
+  draft=$(echo "$matches" | jq -r '.[0].isDraft')
+  if [[ "$normalized" == "human testing" && "$draft" != true ]]; then
+    echo "Error: Human Testing requires an open draft PR. Convert the PR to draft before continuing." >&2
+    return 1
+  fi
+  if [[ "$normalized" == "in review" && "$draft" != false ]]; then
+    echo "Error: In Review requires a non-draft PR. After human approval run workflow-cli.sh ready-pr ${ticket}." >&2
     return 1
   fi
   return 0
@@ -871,7 +882,7 @@ case "$COMMAND" in
     route_to_tool "$WORKFLOW_TOOL" milestone "$SUB" "$@"
     ;;
 
-  create-subtask|create-epic|create-pr|list|get-labels)
+  create-subtask|create-epic|create-pr|ready-pr|draft-pr|list|get-labels)
     load_config
     route_to_tool "$WORKFLOW_TOOL" "$COMMAND" "$@"
     ;;
@@ -989,7 +1000,9 @@ case "$COMMAND" in
     echo "  create-subtask ...           Create a sub-issue/task"
     echo "  create-epic <title> [body]   Create a top-level Epic (no parent)"
     echo "  update-status ...            Update ticket status (SRS-label guarded)"
-    echo "  create-pr ...                Create pull request"
+    echo "  create-pr <ticket> [--draft]  Create pull request"
+    echo "  ready-pr <ticket>            Mark pull request ready for review"
+    echo "  draft-pr <ticket>            Return pull request to draft"
     echo "  list ...                     List tickets"
     echo "  get-labels <ticket>          List every label on a ticket"
     exit 1
@@ -998,7 +1011,7 @@ case "$COMMAND" in
   *)
     echo -e "${RED}Error: Unknown command '${COMMAND}'${NC}"
     echo ""
-    echo "Available commands: status, next, validate, help, detect-complexity, retag, prepare, test, create-subtask, update-status, create-pr, list, get-labels, transition-drafting"
+    echo "Available commands: status, next, validate, help, detect-complexity, retag, prepare, test, create-subtask, update-status, create-pr, ready-pr, draft-pr, list, get-labels, transition-drafting"
     echo "Run 'workflow-cli.sh help' for usage details"
     exit 1
     ;;

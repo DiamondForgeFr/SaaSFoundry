@@ -7,10 +7,10 @@ entry_conditions:
   - One of:
       - Human Testing validated + non-regression tests created and pushed (`nature:user-facing` path)
       - AI Testing passed + ticket carries `nature:internal` label (skip-Human-Testing path — see SKILL.md "Nature axis")
-  - **An open Pull Request exists for the ticket** (PR-existence guard — `In Review` without a PR is rejected by the CLI)
+  - **An open, non-draft Pull Request exists for the ticket** (PR-existence guard — `In Review` without a PR is rejected by the CLI)
   - Ticket is **not** `nature:bundled-pr` — those go AI Testing → Done directly (no individual PR at this Sub level)
 mandatory_actions:
-  - Create the Pull Request (title + description + test plan + test list + reviewers + ticket link)
+  - Promote the approved draft via `workflow-cli.sh ready-pr <ticket>`; internal tickets may create a ready PR directly
   - Move ticket to `In Review`
   - Monitor CI until green
   - Answer reviewer comments and implement requested changes
@@ -36,9 +36,13 @@ Code review with mandatory green CI.
 
 ## Action checklist
 
-- [ ] **Create the PR** — title = ticket title; description = ticket link + change summary + test plan (copy from ticket) + created tests (unit + E2E); assign configured reviewers; link PR to ticket
+- [ ] **Ready PR** — promote the approved draft using `workflow-cli.sh ready-pr <ticket>`. Internal tickets may use `create-pr <ticket>` directly. Keep the ticket link, change summary, test
+      plan/results and created tests in its description; assign configured reviewers.
 - [ ] **Move ticket** to `In Review` via `workflow-cli.sh update-status`
-- [ ] **Monitor CI** — on red: analyze logs, fix, commit, push, wait for green
+- [ ] **Monitor CI** — readiness starts the complete applicable suite, and later non-draft pushes rerun it. Draft-skipped checks are not successful validation.
+- [ ] **Handle CI failures** — on red: analyze logs, fix, commit, push, wait for green
+- [ ] **Human retesting needed** — `workflow-cli.sh draft-pr <ticket>` explicitly returns the PR to draft and cancels obsolete CI under the configured policy; fix and rerun AI Testing before returning
+      to Human Testing.
 - [ ] **Monitor reviews** — answer questions, implement requested changes
 - [ ] **Reviewer asks for extra tests** — create them, run locally, commit, push, wait for green CI, resolve conversation
 - [ ] **Wait for approval + green CI** — do nothing until the developer merges
@@ -51,8 +55,8 @@ Code review with mandatory green CI.
 
 ## Guard
 
-`workflow-cli.sh update-status <N> "In review"` exits non-zero when no open PR has a head branch matching `feature/<N>-…` or `fix/<N>-…`. Escape hatch (rare, e.g. a PR opened from a differently-named
-branch): `SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD=1`.
+`workflow-cli.sh update-status <N> "In review"` exits non-zero when no open, non-draft PR has a head branch matching `feature/<N>-…` or `fix/<N>-…`. Escape hatch (rare, e.g. a PR opened from a
+differently-named branch): `SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD=1`.
 
 > [!note] Convention sanity check
 >
