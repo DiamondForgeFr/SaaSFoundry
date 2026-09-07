@@ -38,13 +38,10 @@ else
     fi
   fi
 
-  # Run heavy tests (Docker build scenarios) before pushing
-  echo "Running pre-push tests (Docker build scenarios)..."
-  npm run test:pre-push
-  if [ $? -ne 0 ]; then
-    echo "❌ Pre-push tests failed. Push aborted."
-    exit 1
-  fi
+  # Heavy validation belongs to AI testing, before the draft PR enters Human testing.
+  # Keep pushes during human feedback inexpensive; pre-commit checks still apply.
+  echo "Before Human testing, run npm run test:pre-push during AI testing and record the results."
+  echo "Full CI runs when the PR is marked ready for review and on subsequent pushes."
 fi
 
 # All checks passed

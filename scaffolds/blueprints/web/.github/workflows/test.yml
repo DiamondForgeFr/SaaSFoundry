@@ -2,10 +2,17 @@ name: Tests
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     branches: [{{CI_PR_BRANCHES}}]
+
+# Returning a PR to draft cancels the previous validation run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Installation and build
     runs-on: ubuntu-latest
     steps:
@@ -35,6 +42,7 @@ jobs:
             ${{ runner.os }}-build-
 
   test-code-compliance:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Tests - Code compliance (Prettier / ESLint / Type Check)
     needs: [build]
     runs-on: ubuntu-latest
@@ -96,6 +104,7 @@ jobs:
         run: npm run format
 
   test-e2e:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Tests - E2E
     needs: [build, test-code-compliance]
     runs-on: ubuntu-latest

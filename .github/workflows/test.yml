@@ -4,10 +4,17 @@ on:
   push:
     branches: [master, develop, 'rc-*']
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     branches: [master, develop]
+
+# Returning a PR to draft cancels the previous validation run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   unit:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
@@ -20,6 +27,7 @@ jobs:
       - run: npm run test:unit
 
   integration:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Integration Tests
     runs-on: ubuntu-latest
     steps:
@@ -32,6 +40,7 @@ jobs:
       - run: npm run test:integration
 
   e2e:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: E2E Tests
     runs-on: ubuntu-latest
     steps:
@@ -44,6 +53,7 @@ jobs:
       - run: npm run test:e2e
 
   lint:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Lint & Type Check
     runs-on: ubuntu-latest
     steps:
@@ -61,6 +71,7 @@ jobs:
   # until release time — and would have failed the v1.0.0 deploy rather than a PR. Build it
   # here so it breaks on the PR that breaks it.
   docs:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Docs Build
     runs-on: ubuntu-latest
     steps:
@@ -73,6 +84,7 @@ jobs:
       - run: npm run docs:build
 
   coverage:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Coverage
     runs-on: ubuntu-latest
     steps:
@@ -99,7 +111,7 @@ jobs:
   docker-scenarios:
     name: Resolve docker scenarios
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
     outputs:
       full: ${{ steps.resolve.outputs.full }}
       quick: ${{ steps.resolve.outputs.quick }}
@@ -118,7 +130,7 @@ jobs:
     name: Docker Build (${{ matrix.scenario }})
     runs-on: ubuntu-latest
     needs: docker-scenarios
-    if: github.event_name == 'pull_request' && github.base_ref == 'master'
+    if: github.event_name == 'pull_request' && github.base_ref == 'master' && !github.event.pull_request.draft
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -145,7 +157,7 @@ jobs:
     name: Docker Build (${{ matrix.scenario }})
     runs-on: ubuntu-latest
     needs: docker-scenarios
-    if: github.event_name == 'pull_request' && github.base_ref == 'develop'
+    if: github.event_name == 'pull_request' && github.base_ref == 'develop' && !github.event.pull_request.draft
     timeout-minutes: 15
     strategy:
       fail-fast: false
