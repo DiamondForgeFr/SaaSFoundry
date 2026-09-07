@@ -193,3 +193,13 @@ For the v1.0 / v2.0 acceptance rubric, see [`.claude/docs/release-objectives.md`
 - [Architecture: modules](https://github.com/DiamondForgeFr/SaasFoundryAI/blob/develop/.claude/docs/architecture-modules.md) — internal reference for adding new modules
 - [Architecture: skills](https://github.com/DiamondForgeFr/SaasFoundryAI/blob/develop/.claude/docs/architecture-skills.md) — internal reference for adding new skills
 - [Migration framework](https://github.com/DiamondForgeFr/SaasFoundryAI/blob/develop/.claude/docs/migration-framework.md) — required reading before any breaking change
+
+### Synchronizing the review button with GitHub Projects
+
+The **Ready for review** button triggers `.github/workflows/pr-review-sync.yml`. It checks the live PR and its linked ticket, then uses the guarded workflow CLI to move the ticket to **In review**.
+Configure the `SF_PROJECTS_TOKEN` Actions secret with repository access and write access to the organization Project. GitHub's default Actions token cannot access Projects; see
+[GitHub's Projects automation documentation](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/automating-projects-using-actions).
+
+The listener must first be merged into the repository default branch. It never runs code from the PR head. It supports same-repository PRs, requires the native closing-issue link to agree with the
+configured branch ticket, and preserves all status guards. Missing credentials or linkage fails visibly; rerun after correcting configuration. Use the CLI manually for fork PRs or clicks made before
+installation. Existing custom listeners are preserved during skill installation.

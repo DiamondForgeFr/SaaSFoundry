@@ -96,4 +96,17 @@ describe('installWorkflowSkill', () => {
     expect(claudeMd).toContain('SaaSFoundry AI Workflow')
     expect(claudeMd).toContain('## Development Commands')
   })
+  it('installs the GitHub review listener and preserves a customized existing workflow', async () => {
+    await installWorkflowSkill({ targetPath: dir, workflow: TEAM_WORKFLOW })
+    const listener = join(dir, '.github/workflows/pr-review-sync.yml')
+    expect(await readFile(listener, 'utf8')).toContain('pull_request_target:')
+    await writeFile(listener, '# customized workflow\n')
+    await installWorkflowSkill({ targetPath: dir, workflow: TEAM_WORKFLOW })
+    expect(await readFile(listener, 'utf8')).toBe('# customized workflow\n')
+  })
+
+  it('does not install a GitHub listener for another workflow backend', async () => {
+    await installWorkflowSkill({ targetPath: dir, workflow: { ...TEAM_WORKFLOW, tool: 'jira' } })
+    await expect(readFile(join(dir, '.github/workflows/pr-review-sync.yml'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
 })
