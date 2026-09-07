@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { lstat, mkdir, readFile, readdir, writeFile } from 'fs/promises'
-import { dirname, join, resolve } from 'path'
+import { dirname, join, posix, resolve } from 'path'
 
 import { skillsTemplatesPath } from '../types'
 import { hashFileContent } from '../utils'
@@ -186,6 +186,16 @@ async function bundledFiles(name: string): Promise<Set<string>> {
   return files
 }
 
+function retainLegacyDocLinks(content: string, skillPath: string): string {
+  return content.replace(/\]\(([^\s)]+)([^)]*)\)/g, (link, destination: string, title: string) => {
+    if (!destination.startsWith('.')) return link
+    const sourceTarget = posix.normalize(posix.join('.claude/skills', posix.dirname(skillPath), destination))
+    if (!sourceTarget.startsWith('.claude/docs/')) return link
+    const sharedDirectory = posix.join('.agents/skills', posix.dirname(skillPath))
+    return `](${posix.relative(sharedDirectory, sourceTarget)}${title})`
+  })
+}
+
 /**
  * Additive bridge after legacy harness deposition. No credentials, hooks, existing
  * Claude files or agent-specific settings are changed. Structural migration and
@@ -260,7 +270,8 @@ export async function installAgentInstructions({ targetPath, agents, manifest }:
             continue
           }
           const sourcePath = join(targetPath, source, rel)
-          const content = rel === `${skill.name}/SKILL.md` ? Buffer.from(normalized) : await readFile(sourcePath)
+          let content = rel === `${skill.name}/SKILL.md` ? Buffer.from(normalized) : await readFile(sourcePath)
+          if (rel.endsWith('.md')) content = Buffer.from(retainLegacyDocLinks(content.toString('utf8'), rel))
           await deposit(targetPath, `.agents/skills/${rel}`, content, (await lstat(sourcePath)).mode & 0o777, baselines, report)
         }
       }

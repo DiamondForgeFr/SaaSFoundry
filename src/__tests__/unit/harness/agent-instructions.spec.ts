@@ -139,6 +139,14 @@ describe('shared agent instructions', () => {
     expect(await get('.agents/skills/sf-git-commit/SKILL.md')).toContain('description: "Trigger when committing or pushing changes."')
   })
 
+  it('keeps shared Markdown links pointing at the existing common documentation', async () => {
+    await put('.claude/skills/sf-workflow/SKILL.md', '# Workflow\nRead [manifest](../../docs/manifest-schema.md) and [phase](statuses/1-backlog.md).')
+    await install()
+    const shared = await get('.agents/skills/sf-workflow/SKILL.md')
+    expect(shared).toContain('[manifest](../../../.claude/docs/manifest-schema.md)')
+    expect(shared).toContain('[phase](statuses/1-backlog.md)')
+  })
+
   it('never overwrites existing user instructions, changed tracked files or reconciliation sidecars', async () => {
     const first = await install()
     await put('AGENTS.md', '# User rules')
