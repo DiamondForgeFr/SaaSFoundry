@@ -1,1 +1,5 @@
+# Tests create foreign Git repositories. Do not pass the hook's repository
+# bindings to those subprocesses (especially when committing from a worktree).
+sf_hook_git_vars=$(git rev-parse --local-env-vars) || exit $?
+unset $sf_hook_git_vars
 npm run test:pre-commit

@@ -105,6 +105,49 @@ describe('harness installer', () => {
       const claudeMd = await readFile(join(dir, 'CLAUDE.md'), 'utf8')
       expect(claudeMd).toContain('# bare')
     })
+
+    it('adds shared discovery without removing the Claude workflow', async () => {
+      await installHarness({ targetPath: dir, ...params, agents: ['claude-code', 'codex', 'kimi'] })
+
+      const instructions = await readFile(join(dir, 'AGENTS.md'), 'utf8')
+      expect(instructions).toContain('CLAUDE.md')
+      for (const root of ['.claude', '.agents']) {
+        expect(await fileExists(join(dir, root, 'skills', 'sf-workflow', 'SKILL.md'))).toBe(true)
+        expect(await fileExists(join(dir, root, 'skills', 'sf-tool-github-projects', 'github-projects-cli.sh'))).toBe(true)
+      }
+      const sharedCommit = await readFile(join(dir, '.agents', 'skills', 'sf-git-commit', 'SKILL.md'), 'utf8')
+      expect(sharedCommit).toMatch(/name: sf-git-commit/)
+      expect(sharedCommit).not.toMatch(/^model:/m)
+      const settings = JSON.parse(await readFile(join(dir, '.claude', 'settings.json'), 'utf8'))
+      expect(settings.hooks.SessionStart).toBeDefined()
+    })
+
+    it('keeps shared discovery opt-in', async () => {
+      await installHarness({ targetPath: dir, ...params })
+      expect(await fileExists(join(dir, 'AGENTS.md'))).toBe(false)
+      expect(await fileExists(join(dir, '.agents'))).toBe(false)
+    })
+
+    it('does not reinstall customized Claude skills when adding another agent', async () => {
+      await installHarness({ targetPath: dir, ...params })
+      const path = join(dir, '.claude', 'skills', 'sf-git-commit', 'SKILL.md')
+      const customized = '# Custom commit procedure\nUse the project workflow.\n'
+      await writeFile(path, customized)
+      const instructions = await readFile(join(dir, 'CLAUDE.md'), 'utf8')
+      await installHarness({ targetPath: dir, ...params, agents: ['codex'] })
+      expect(await readFile(path, 'utf8')).toBe(customized)
+      expect(await readFile(join(dir, 'CLAUDE.md'), 'utf8')).toBe(instructions)
+      expect(await readFile(join(dir, '.agents', 'skills', 'sf-git-commit', 'SKILL.md'), 'utf8')).toContain('Custom commit procedure')
+    })
+
+    it('reports a partial existing harness before changing its files', async () => {
+      await mkdir(join(dir, '.claude', 'skills', 'personal'), { recursive: true })
+      await writeFile(join(dir, '.claude', 'skills', 'personal', 'SKILL.md'), 'personal')
+      await expect(installHarness({ targetPath: dir, ...params, agents: ['codex'] })).rejects.toThrow('partial harness')
+      expect(await fileExists(join(dir, 'CLAUDE.md'))).toBe(false)
+      expect(await fileExists(join(dir, '.claude', 'settings.json'))).toBe(false)
+      expect(await readFile(join(dir, '.claude', 'skills', 'personal', 'SKILL.md'), 'utf8')).toBe('personal')
+    })
   })
 })
 
@@ -139,5 +182,15 @@ describe('computeHarnessFileHashes', () => {
   it('returns an empty map on a repo without deposits', async () => {
     const { computeHarnessFileHashes } = await import('../../../installers/harness.installer')
     expect(await computeHarnessFileHashes(dir)).toEqual({})
+  })
+
+  it('does not adopt shared user files into the legacy refresh baseline', async () => {
+    await mkdir(join(dir, '.agents', 'skills', 'sf-example'), { recursive: true })
+    await mkdir(join(dir, '.agents', 'skills', 'user-example'), { recursive: true })
+    await writeFile(join(dir, '.agents', 'skills', 'sf-example', 'SKILL.md'), 'managed')
+    await writeFile(join(dir, '.agents', 'skills', 'user-example', 'SKILL.md'), 'user')
+    await writeFile(join(dir, 'AGENTS.md'), 'user-owned entry point')
+    const { computeHarnessFileHashes } = await import('../../../installers/harness.installer')
+    expect(Object.keys(await computeHarnessFileHashes(dir))).toEqual([])
   })
 })

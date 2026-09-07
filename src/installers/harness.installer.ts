@@ -7,8 +7,9 @@ import { installCoreSkills } from './core-skills.installer'
 import { installOptionalSkills } from './optional-skills.installer'
 import { installToolSkill } from './tool-skill.installer'
 import { injectWorkflowSection, installWorkflowSkill } from './workflow-skill.installer'
+import { AgentInstructionsReport, HarnessAgent, installAgentInstructions } from '../harness/agent-instructions'
 import type { ModuleInstaller } from '../migrations/module/types'
-import { WorkflowConfig, skillsTemplatesPath } from '../types'
+import { SaaSFoundryManifest, WorkflowConfig, skillsTemplatesPath } from '../types'
 import { ClaudeHooksConfig, mergeClaudeSettingsHooks } from '../utils/claude-settings'
 import { computeFileHashes, fileExists } from '../utils'
 
@@ -92,6 +93,8 @@ export interface InstallHarnessParams {
   mainBranch?: string
   workflow?: WorkflowConfig
   advancedSkills?: string[]
+  /** Additive instruction adapters. Omission preserves the legacy Claude installation. */
+  agents?: HarnessAgent[]
 }
 
 const HARNESS_HOOKS: ClaudeHooksConfig = {
@@ -144,7 +147,23 @@ export async function mergeHarnessUserFiles({ targetPath, projectName, version, 
  * (workflow section injection), and .claude/settings.json is merged, never
  * overwritten.
  */
-export async function installHarness({ targetPath, projectName, version, mainBranch = 'main', workflow, advancedSkills = [] }: InstallHarnessParams): Promise<void> {
+export async function installHarness({
+  targetPath,
+  projectName,
+  version,
+  mainBranch = 'main',
+  workflow,
+  advancedSkills = [],
+  agents
+}: InstallHarnessParams): Promise<AgentInstructionsReport | undefined> {
+  // Adding discovery must not reinstall the user's customized legacy skills.
+  // Refreshing those files belongs to the conflict-aware update flow.
+  if (agents?.some((agent) => agent === 'codex' || agent === 'kimi') && (await fileExists(join(targetPath, '.claude', 'skills')))) {
+    if (!(await fileExists(join(targetPath, 'CLAUDE.md')))) {
+      throw new Error('Existing Claude skills have no CLAUDE.md instruction source. Reconcile this partial harness before adding shared agent instructions; existing files were left unchanged.')
+    }
+    return addAgentInstructions(targetPath, agents)
+  }
   const claudeMdPath = join(targetPath, 'CLAUDE.md')
   const depositedClaudeMd = !(await fileExists(claudeMdPath))
 
@@ -171,4 +190,17 @@ export async function installHarness({ targetPath, projectName, version, mainBra
       .replace(/\{\{MAIN_BRANCH\}\}/g, mainBranch)
     await writeFile(claudeMdPath, content)
   }
+
+  if (agents) {
+    return addAgentInstructions(targetPath, agents)
+  }
+}
+
+async function addAgentInstructions(targetPath: string, agents: HarnessAgent[]): Promise<AgentInstructionsReport> {
+  const manifestPath = join(targetPath, '.saasfoundry.json')
+  const manifest: SaaSFoundryManifest | undefined = (await fileExists(manifestPath)) ? JSON.parse(await readFile(manifestPath, 'utf8')) : undefined
+  const report = await installAgentInstructions({ targetPath, agents, manifest })
+  for (const warning of report.warnings) console.warn(warning)
+  for (const conflict of report.conflicts) console.warn(`Agent instructions need reconciliation: ${conflict}`)
+  return report
 }
