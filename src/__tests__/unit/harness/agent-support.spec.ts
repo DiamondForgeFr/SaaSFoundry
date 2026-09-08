@@ -136,7 +136,7 @@ describe('additive managed agent support (#660)', () => {
     expect(await get('.saasfoundry.json')).toBe(content)
     expect(await readdir(root)).not.toContain('AGENTS.md')
   })
-  it.each(['.saasfoundry.json', 'CLAUDE.md', '.claude/skills'])('rejects missing required managed harness path %s', async (target) => {
+  it.each(['.saasfoundry.json', 'CLAUDE.md'])('rejects missing required managed harness path %s', async (target) => {
     await rm(join(root, target), { recursive: true })
     await expect(enable(['codex'])).rejects.toThrow('No managed harness')
     expect(await readdir(root)).not.toContain('AGENTS.md')

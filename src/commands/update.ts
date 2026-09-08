@@ -35,27 +35,29 @@ import { runModuleMigrations } from '../migrations/module/registry'
 import { Answers, SaaSFoundryManifest, SrsToolConfig, isScaffoldManifest } from '../types'
 import { upsertEnvKey } from '../utils/env-file'
 import { ensureGitignorePatterns } from '../utils/gitignore'
-import { checkNodeVersion, computeFileHashes, fileExists, getNvmPrefix } from '../utils'
+import { checkNodeVersion, computeFileHashes, fileExists, getNvmPrefix, hashFileContent } from '../utils'
 import { version as cliVersion } from '../../package.json'
 import { buildUpdatePrefillFromOptions, ConflictStrategy, parseConflictStrategy, UpdateCommandOptions, UpdateDryRunReport } from './update.options'
 import { runRequired } from '../run'
 import { getSharedAgentEntrypoints } from '../harness/agent-registry'
+import { CODEX_SOURCE_CLAUDE_BRIDGE } from '../harness/agent-instructions'
 
 // Shared agent deposits have their own conflict-aware baselines. Generic
 // scaffold refreshes must neither delete them nor adopt user edits/private skills.
 const SHARED_AGENT_ENTRYPOINTS = new Set(getSharedAgentEntrypoints())
-function isSharedAgentPath(path: string): boolean {
+function isSharedAgentPath(path: string, protectClaude = false): boolean {
   const normalized = path.replaceAll('\\', '/')
-  return SHARED_AGENT_ENTRYPOINTS.has(normalized) || normalized.startsWith('.agents/')
+  return (protectClaude && normalized === 'CLAUDE.md') || SHARED_AGENT_ENTRYPOINTS.has(normalized) || normalized.startsWith('.agents/')
 }
 
-function withoutSharedAgentHashes(hashes: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.entries(hashes).filter(([path]) => !isSharedAgentPath(path)))
+function withoutSharedAgentHashes(hashes: Record<string, string>, protectClaude = false): Record<string, string> {
+  return Object.fromEntries(Object.entries(hashes).filter(([path]) => !isSharedAgentPath(path, protectClaude)))
 }
 
 async function refreshProjectHashes(manifest: SaaSFoundryManifest): Promise<Record<string, string>> {
-  const sharedBaselines = Object.fromEntries(Object.entries(manifest.fileHashes ?? {}).filter(([path]) => isSharedAgentPath(path)))
-  return { ...withoutSharedAgentHashes(await computeFileHashes('.')), ...sharedBaselines }
+  const protectClaude = manifest.fileHashes?.['CLAUDE.md'] === hashFileContent(CODEX_SOURCE_CLAUDE_BRIDGE)
+  const sharedBaselines = Object.fromEntries(Object.entries(manifest.fileHashes ?? {}).filter(([path]) => isSharedAgentPath(path, protectClaude)))
+  return { ...withoutSharedAgentHashes(await computeFileHashes('.'), protectClaude), ...sharedBaselines }
 }
 
 export interface FileUpdate {
@@ -370,7 +372,7 @@ interface RefreshHarnessOptions {
 async function refreshHarnessDeposits(manifest: SaaSFoundryManifest, manifestPath: string, { dryRun, nonInteractive, conflictStrategy, dryRunReport }: RefreshHarnessOptions): Promise<void> {
   const currentHashes = await computeHarnessFileHashes('.')
   const hasDeposits = Object.keys(currentHashes).length > 0
-  const tracked = manifest.modules?.harness !== undefined
+  const tracked = (manifest.modules?.harness?.version ?? 0) > 0
 
   if (!hasDeposits && !tracked) return
 
@@ -614,7 +616,12 @@ export async function updateCommand(opts: UpdateCommandOptions = {}) {
 
         // Three-way comparison
         spinner.text = 'Comparing files...'
-        const updates = computeFileUpdates(withoutSharedAgentHashes(manifest.fileHashes), withoutSharedAgentHashes(currentHashes), withoutSharedAgentHashes(targetHashes))
+        const protectClaude = manifest.fileHashes?.['CLAUDE.md'] === hashFileContent(CODEX_SOURCE_CLAUDE_BRIDGE)
+        const updates = computeFileUpdates(
+          withoutSharedAgentHashes(manifest.fileHashes, protectClaude),
+          withoutSharedAgentHashes(currentHashes, protectClaude),
+          withoutSharedAgentHashes(targetHashes, protectClaude)
+        )
 
         if (updates.length === 0) {
           spinner.succeed(chalk.green('No template changes to apply.'))

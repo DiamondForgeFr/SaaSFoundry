@@ -9,6 +9,9 @@ sf agents refresh
 sf agents list --json
 sf agents enable codex --scope shared
 sf agents catalog --json
+sf agents adopt codex claude-code --scope shared
+# Review the preview, then apply that exact plan:
+sf agents adopt codex claude-code --scope shared --apply --plan <plan-id>
 ```
 
 ## Scope and prerequisites
@@ -22,19 +25,58 @@ modification, the complete local setup fails before depositing files. Identical 
 **Shared scope is explicit.** `--scope shared` stores the selected support in the optional `modules.harness.agents` field and produces files to review and commit through the normal project workflow.
 It also works in managed directories without Git. A legacy manifest without this field starts with Claude Code configured. Sharing one agent does not publish all personal selections.
 
-Unmanaged repository adoption belongs to #649. These commands do not install runtimes, change credentials or permissions, or verify native agent discovery. Profiles are registered by tool identifier:
-`claude-code`, `codex`, `kimi`, `gemini-cli`, `qwen-code` and `generic`. Use `sf agents catalog` to inspect the current versioned catalog. Model names such as `gpt`, `sonnet` or `k2` are not agent
-identifiers. These commands do not install agent runtimes or probe their native discovery behavior.
+`sf agents adopt` is the entry point for an existing repository that does not yet have a SaaSFoundry manifest. Its default invocation is a pure preview: it inventories recognized instruction and skill
+surfaces, identifies the source it can preserve, and reports every proposed file, prerequisite, warning, and conflict without writing files, Git configuration, exclusions, state, or lock files.
+Applying requires both `--apply` and the exact `--plan <id>` printed by that preview. The command recomputes the plan before writing and rejects a stale ID if the repository changed.
+
+These commands do not install runtimes, change credentials or permissions, or verify native agent discovery. Profiles are registered by tool identifier: `claude-code`, `codex`, `kimi`, `gemini-cli`,
+`qwen-code` and `generic`. Use `sf agents catalog` to inspect the current versioned catalog. Model names such as `gpt`, `sonnet` or `k2` are not agent identifiers. These commands do not install agent
+runtimes or probe their native discovery behavior.
 
 ## Commands
 
 | Command                                      | Behavior                                                          |
 | -------------------------------------------- | ----------------------------------------------------------------- |
+| `adopt <agents...> [--scope local\|shared]`  | Plans by default; applies only with `--apply --plan <id>`.        |
 | `enable <agents...> [--scope local\|shared]` | Adds support in the selected scope; defaults to local.            |
 | `refresh [--scope local\|shared]`            | Refreshes instructions in that scope; defaults to local.          |
 | `list`                                       | Reports shared, local and effective agents plus discovered files. |
 
 All commands accept `--json`. `list` is read-only and reports runtime discovery as `not-checked`.
+
+## Adopting an existing repository
+
+Start from the repository root and request the tool profiles that should be supported:
+
+```bash
+sf agents adopt codex claude-code --json
+```
+
+The JSON plan is versioned and includes `planId`, `source`, the existing inventory, proposed file actions, conflicts, warnings, prerequisites, and `canApply`. Preview works without a manifest so it
+can explain what is reusable and, when workflow configuration is absent, point to `sf workflow` as a prerequisite. Applying requires an existing valid `.saasfoundry.json`; the preview never creates or
+repairs one.
+
+When `canApply` is true, apply the exact reviewed plan:
+
+```bash
+sf agents adopt codex claude-code --scope local --apply --plan <plan-id>
+```
+
+Local adoption is personal to the checkout and does not modify tracked files. Shared adoption writes a reviewable working-tree diff for the team workflow. Neither mode stages, commits, pushes, changes
+branches, or moves the chosen source file. A changed inventory, source, request, or scope produces a different plan ID and the old apply command is rejected.
+
+Shared adoption records harness version `0` when the manifest has no existing harness stamp. This identifies instruction adoption without claiming that the full harness or its skill set was installed;
+`sf update` can therefore distinguish an adopted instruction surface from a complete harness. An existing harness version is retained.
+
+Adoption creates reference wrappers only. It does not copy even recognized skill files: a customized script or skill body can contain credentials. The wrappers point to existing procedures for
+explicit reading, including custom skills. This reference-only behavior is retained by later agent refreshes.
+
+A repository with only `AGENTS.md` can be adopted for Codex without fabricating `CLAUDE.md` or requiring `.claude/skills`; a generated Claude reference is optional when Claude Code is also requested.
+If both Claude and portable instruction roots contain custom content, adoption reports a conflict and does not silently choose precedence. Original instruction files remain user-owned; only exact
+generated wrappers receive managed baselines.
+
+Adoption is additive. There is no automatic removal command: removing an adapter is a separate deliberate operation because user edits, shared history, and local exclusions must be evaluated at that
+time.
 
 ## Git exclusions and worktrees
 
@@ -53,6 +95,9 @@ Git documents the worktree configuration mechanism and its prerequisites in the 
 ## Preservation and conflicts
 
 Existing instructions, hooks, credentials and unrelated configuration are preserved. Repeating an unchanged operation avoids rewriting the manifest and generated files.
+
+Runtime availability, native hooks, and manually readable skills are reported as distinct capabilities. A runtime being installed does not prove its hooks ran; a Markdown file being readable does not
+prove native skill discovery or workflow enforcement.
 
 Local setup preflights the complete destination set; conflicting tracked or customized files cause a nonzero result. Shared setup retains the existing conflict-aware behavior: custom files remain in
 place, `.saasfoundry.new` sidecars provide reconciliation content where possible, and successful baselines are retained for retry. A conflict never claims the requested support was successfully

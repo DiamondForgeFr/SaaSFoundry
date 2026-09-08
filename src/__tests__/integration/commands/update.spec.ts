@@ -1,3 +1,4 @@
+import { CODEX_SOURCE_CLAUDE_BRIDGE } from '../../../harness/agent-instructions'
 import { mkdir, rm, writeFile, readFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -134,6 +135,7 @@ describe('updateCommand (integration)', () => {
     await writeFile(privateSkill, 'private user procedure\n')
     await writeFile('AGENTS.md', 'customized agent entry point\n')
     await writeFile('GEMINI.md', 'customized Gemini entry point\n')
+    await writeFile('CLAUDE.md', 'customized adopted Claude bridge\n')
     // An unchanged tracked shared file would otherwise be deleted because
     // generic scaffold regeneration does not produce shared-agent adapters.
     await writeFile('.agents/skills/sf-workflow/reference.md', 'shared reference\n')
@@ -141,6 +143,7 @@ describe('updateCommand (integration)', () => {
       [hashKey(shared)]: hashFileContent('original shared workflow\n'),
       'AGENTS.md': hashFileContent('original agent entry point\n'),
       'GEMINI.md': hashFileContent('original Gemini entry point\n'),
+      'CLAUDE.md': hashFileContent(CODEX_SOURCE_CLAUDE_BRIDGE),
       [hashKey('.agents/skills/sf-workflow/reference.md')]: hashFileContent('shared reference\n')
     }
     const manifest = buildBaseManifest({ version: mode === 'template-refresh' ? '0.0.1' : cliVersion, manifestVersion: targetManifestVersion(), fileHashes: sharedHashes })
@@ -166,6 +169,7 @@ describe('updateCommand (integration)', () => {
       expect(await readFile(shared, 'utf8')).toBe('customized shared workflow\n')
       expect(await readFile('AGENTS.md', 'utf8')).toBe('customized agent entry point\n')
       expect(await readFile('GEMINI.md', 'utf8')).toBe('customized Gemini entry point\n')
+      expect(await readFile('CLAUDE.md', 'utf8')).toBe('customized adopted Claude bridge\n')
       expect(await readFile('.agents/skills/sf-workflow/reference.md', 'utf8')).toBe('shared reference\n')
       if (mode === 'module-install') expect(mockedInstallAnalytics).toHaveBeenCalledTimes(1)
       expect(errorSpy).not.toHaveBeenCalled()

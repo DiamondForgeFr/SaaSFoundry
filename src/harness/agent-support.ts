@@ -1,9 +1,22 @@
 import { createHash, randomUUID } from 'crypto'
-import { lstat, mkdir, open, readFile, readdir, rename, unlink, writeFile } from 'fs/promises'
+import { lstat, mkdir, open, readFile, readdir, rename, unlink } from 'fs/promises'
 import { dirname, join, resolve } from 'path'
 
-import { AgentInstructionsReport, HarnessAgent, installAgentInstructions, planAgentInstructions, AgentInstructionFile } from './agent-instructions'
+import {
+  AgentInstructionsReport,
+  AgentInstructionsError,
+  ADOPTION_COMMON_INSTRUCTIONS,
+  CODEX_SOURCE_CLAUDE_BRIDGE,
+  HarnessAgent,
+  installAgentInstructions,
+  installPlannedAgentInstructions,
+  AgentInstructionPlan,
+  planAgentInstructions,
+  AgentInstructionFile,
+  inspectInstructionSource
+} from './agent-instructions'
 import { inspectGitAgentScope, configureLocalAgentExcludes, removeLocalAgentExcludes, NotGitRepositoryError, GitAgentScope } from './git-agent-scope'
+import { safeWriteAgentFile } from './agent-file-writer'
 import { getAgentIds, isHarnessAgent, getSharedAgentEntrypoints } from './agent-registry'
 import { harnessInstallerMeta } from '../installers/harness.installer'
 import { SaaSFoundryManifest } from '../types'
@@ -26,11 +39,18 @@ export interface AgentSupportResult {
   localAgents: HarnessAgent[]
   report: AgentInstructionsReport
   manifestChanged: boolean
+  previewPlan?: AgentInstructionPlan
+  fingerprint?: string
 }
 
 interface SupportParams {
   targetPath: string
   scope?: string
+  /** Internal read-only projection; never creates locks, excludes or files. */
+  preview?: boolean
+  /** Revalidate an approved adoption snapshot under the coordinator lock. */
+  verify?: () => Promise<AgentInstructionPlan>
+  adoption?: boolean
 }
 interface ManifestSnapshot {
   manifest: SaaSFoundryManifest
@@ -110,26 +130,26 @@ async function snapshot(root: string): Promise<ManifestSnapshot> {
   return { manifest, content, mode: (await lstat(path)).mode & 0o777 }
 }
 
-function configured(manifest: SaaSFoundryManifest): HarnessAgent[] {
+function configured(manifest: SaaSFoundryManifest, source: 'claude' | 'codex' | 'mixed' | 'missing' = 'claude'): HarnessAgent[] {
   // Legacy managed harnesses already provide Claude instruction discovery.
-  return [...new Set(manifest.modules?.harness?.agents ?? ['claude-code'])] as HarnessAgent[]
+  return [...new Set(manifest.modules?.harness?.agents ?? (source === 'codex' ? ['codex'] : ['claude-code']))] as HarnessAgent[]
 }
 
-async function inspect(root: string): Promise<{ before: ManifestSnapshot; discovered: AgentSupportInventory['discovered'] }> {
+async function inspect(root: string) {
   const before = await snapshot(root)
-  await regularPath(root, 'CLAUDE.md', 'file')
-  await regularPath(root, '.claude/skills', 'directory')
-  const sharedInstructions = await regularPath(root, 'AGENTS.md', 'file', false)
+  const instructions = await inspectInstructionSource(root)
+  if (instructions.source === 'missing') throw new Error(`No managed harness at ${root}: CLAUDE.md or AGENTS.md is required. Configure project instructions before adoption.`)
+  await regularPath(root, '.claude/skills', 'directory', false)
   const sharedSkills = await regularPath(root, '.agents/skills', 'directory', false)
-  return { before, discovered: { claudeInstructions: true, sharedInstructions, sharedSkills } }
+  return { before, source: instructions.source, discovered: { claudeInstructions: instructions.claudeInstructions, sharedInstructions: instructions.sharedInstructions, sharedSkills } }
 }
 
 export async function readAgentSupport(targetPath: string): Promise<AgentSupportInventory> {
   const root = resolve(targetPath)
-  const { before, discovered } = await inspect(root)
+  const { before, discovered, source } = await inspect(root)
   const git = await optionalGitScope(root)
   const local = git ? await readLocalState(git) : emptyLocalState()
-  const sharedAgents = configured(before.manifest)
+  const sharedAgents = configured(before.manifest, source)
   return { configuredAgents: union(sharedAgents, local.agents), sharedAgents, localAgents: local.agents, discovered, runtime: 'not-checked' }
 }
 
@@ -163,9 +183,39 @@ async function apply(params: SupportParams, requested?: HarnessAgent[]): Promise
   const scope = resolveScope(params.scope)
   if (scope === 'local') return applyLocal(params, requested)
   const root = resolve(params.targetPath)
-  const { before } = await inspect(root)
+  const { before, source } = await inspect(root)
   const git = await optionalGitScope(root)
   const local = git ? await readLocalState(git) : emptyLocalState()
+  if (params.preview) {
+    const previous = configured(before.manifest, source)
+    const candidates = union(previous, requested ?? [])
+    const plan = await planAgentInstructions({
+      targetPath: root,
+      agents: candidates,
+      manifest: before.manifest,
+      referenceOnly:
+        params.adoption || local.fileHashes['AGENTS.md'] === hash(Buffer.from(ADOPTION_COMMON_INSTRUCTIONS)) || local.fileHashes['CLAUDE.md'] === hash(Buffer.from(CODEX_SOURCE_CLAUDE_BRIDGE))
+    })
+    const report: AgentInstructionsReport = { written: [], unchanged: [], conflicts: [], warnings: [...plan.warnings], fileHashes: {} }
+    for (const file of plan.files) {
+      const current = await checkLocalPath(root, file.path)
+      if (current?.equals(file.content)) report.unchanged.push(file.path)
+      else if (current && before.manifest.fileHashes?.[file.path] !== hash(current)) report.conflicts.push(file.path)
+      else report.written.push(file.path)
+      if (!report.conflicts.includes(file.path)) report.fileHashes[file.path] = hash(file.content)
+    }
+    return {
+      scope,
+      configuredAgents: union(previous, local.agents),
+      sharedAgents: previous,
+      localAgents: local.agents,
+      report,
+      manifestChanged: false,
+      localStateChanged: false,
+      previewPlan: plan,
+      fingerprint: hash(Buffer.from(JSON.stringify({ manifest: before.content, local, index: git?.trackedEntries, head: git?.headPaths, planned: planDigest(plan) })))
+    }
+  }
   if (git) await mkdir(dirname(statePath(git)), { recursive: true })
   const lockPath = git ? join(dirname(statePath(git)), 'agents.lock') : join(root, '.saasfoundry.agents.lock')
   let lock
@@ -176,14 +226,27 @@ async function apply(params: SupportParams, requested?: HarnessAgent[]): Promise
       throw new Error('Another agent setup holds .saasfoundry.agents.lock. Wait for it to finish; if interrupted, inspect that lock before retrying.')
     throw error
   }
+  let partialReport: AgentInstructionsReport | undefined
+  let primaryFailure: unknown
   try {
+    const verifiedPlan = await params.verify?.()
+    if (verifiedPlan && (await inspect(root)).source !== source) throw new Error('Instruction source changed during shared preflight; generate a fresh preview.')
     // Cooperating enables cannot overwrite each other; external manifest edits are
     // checked again before saving. No installer, hooks, Git commands or credentials.
     if ((await snapshot(root)).content !== before.content) throw new Error('Manifest changed before agent setup; retry with the current configuration.')
     if (git && JSON.stringify(await readLocalState(git)) !== JSON.stringify(local)) throw new Error('Private agent inventory changed before shared setup; retry with current configuration.')
-    const previous = configured(before.manifest)
+    const previous = configured(before.manifest, source)
     const candidates = AGENTS.filter((agent) => previous.includes(agent) || requested?.includes(agent))
-    const report = await installAgentInstructions({ targetPath: root, agents: candidates, manifest: before.manifest })
+    const report = verifiedPlan
+      ? await installPlannedAgentInstructions(root, verifiedPlan, before.manifest.fileHashes ?? {})
+      : await installAgentInstructions({
+          targetPath: root,
+          agents: candidates,
+          manifest: before.manifest,
+          referenceOnly:
+            params.adoption || local.fileHashes['AGENTS.md'] === hash(Buffer.from(ADOPTION_COMMON_INSTRUCTIONS)) || local.fileHashes['CLAUDE.md'] === hash(Buffer.from(CODEX_SOURCE_CLAUDE_BRIDGE))
+        })
+    partialReport = report
     const configuredAgents = report.conflicts.length ? previous : candidates
     const next: SaaSFoundryManifest = { ...before.manifest }
     if (!report.conflicts.length) {
@@ -191,7 +254,7 @@ async function apply(params: SupportParams, requested?: HarnessAgent[]): Promise
         ...before.manifest.modules,
         harness: {
           ...before.manifest.modules?.harness,
-          version: before.manifest.modules?.harness?.version ?? harnessInstallerMeta.currentVersion,
+          version: before.manifest.modules?.harness?.version ?? (params.adoption ? 0 : harnessInstallerMeta.currentVersion),
           agents: configuredAgents
         }
       }
@@ -210,9 +273,16 @@ async function apply(params: SupportParams, requested?: HarnessAgent[]): Promise
       report.warnings.push(...cleanup.warnings)
     }
     return { scope: 'shared', configuredAgents: union(configuredAgents, local.agents), sharedAgents: configuredAgents, localAgents: local.agents, report, manifestChanged, localStateChanged }
+  } catch (error) {
+    primaryFailure = error
+    if (error instanceof AgentInstructionsError) {
+      partialReport = error.report
+      throw error
+    }
+    if (params.adoption && partialReport) throw adoptionFailure('shared', partialReport, error)
+    throw error
   } finally {
-    await lock.close()
-    await unlink(lockPath)
+    await releaseLock(lock, lockPath, partialReport, primaryFailure)
   }
 }
 
@@ -259,7 +329,7 @@ async function readLocalState(git: GitAgentScope): Promise<LocalAgentState> {
     isObject(value) &&
     !Object.entries(value).some(
       ([path, hash]) =>
-        !(getSharedAgentEntrypoints().includes(path) || /^\.agents\/skills\/[a-zA-Z0-9_.\/-]+$/.test(path)) ||
+        !(['CLAUDE.md', ...getSharedAgentEntrypoints()].includes(path) || /^\.agents\/skills\/[a-zA-Z0-9_.\/-]+$/.test(path)) ||
         path.split('/').includes('..') ||
         typeof hash !== 'string' ||
         !/^[0-9a-f]{64}$/.test(hash)
@@ -326,13 +396,19 @@ async function checkLocalPath(root: string, path: string): Promise<Buffer | unde
 
 async function applyLocal(params: SupportParams, requested?: HarnessAgent[]): Promise<AgentSupportResult> {
   const root = resolve(params.targetPath)
-  const { before } = await inspect(root)
+  const { before, source } = await inspect(root)
   const git = await inspectGitAgentScope(root, { requireLocalSetup: true })
   const local = await readLocalState(git)
-  const sharedAgents = configured(before.manifest)
+  const sharedAgents = configured(before.manifest, source)
   const localAgents = union(local.agents, requested ?? [])
   const effective = union(sharedAgents, localAgents)
-  const plan = await planAgentInstructions({ targetPath: root, agents: effective, manifest: before.manifest })
+  const plan = await planAgentInstructions({
+    targetPath: root,
+    agents: effective,
+    manifest: before.manifest,
+    referenceOnly:
+      params.adoption || local.fileHashes['AGENTS.md'] === hash(Buffer.from(ADOPTION_COMMON_INSTRUCTIONS)) || local.fileHashes['CLAUDE.md'] === hash(Buffer.from(CODEX_SOURCE_CLAUDE_BRIDGE))
+  })
   const report: AgentInstructionsReport = { written: [], unchanged: [], conflicts: [], warnings: [...plan.warnings], fileHashes: {} }
   const writable: { file: AgentInstructionFile; before?: Buffer }[] = []
   const owned: Record<string, string> = {}
@@ -372,8 +448,22 @@ async function applyLocal(params: SupportParams, requested?: HarnessAgent[]): Pr
       owned[file.path] = hash(file.content)
     }
   }
-  if (report.conflicts.length)
-    return { scope: 'local', configuredAgents: union(sharedAgents, local.agents), sharedAgents, localAgents: local.agents, report, manifestChanged: false, localStateChanged: false }
+  if (params.preview) {
+    report.written = writable.map(({ file }) => file.path)
+    report.fileHashes = owned
+  }
+  if (report.conflicts.length || params.preview)
+    return {
+      previewPlan: params.preview ? plan : undefined,
+      fingerprint: hash(Buffer.from(JSON.stringify({ manifest: before.content, local, index: git.trackedEntries, head: git.headPaths, planned: planDigest(plan) }))),
+      scope: 'local',
+      configuredAgents: union(sharedAgents, local.agents),
+      sharedAgents,
+      localAgents: local.agents,
+      report,
+      manifestChanged: false,
+      localStateChanged: false
+    }
   const currentGit = await inspectGitAgentScope(root)
   if (
     JSON.stringify(currentGit.trackedEntries) !== JSON.stringify(git.trackedEntries) ||
@@ -387,7 +477,10 @@ async function applyLocal(params: SupportParams, requested?: HarnessAgent[]): Pr
     if (error.code === 'EEXIST') throw new Error('Another local agent setup holds agents.lock; retry when it finishes.')
     throw error
   })
+  let primaryFailure: unknown
   try {
+    const verifiedPlan = await params.verify?.()
+    if (verifiedPlan && planDigest(plan) !== planDigest(verifiedPlan)) throw new Error('Instruction plan changed during local preflight; generate a fresh preview.')
     const lockedGit = await inspectGitAgentScope(root)
     if (
       JSON.stringify(lockedGit.trackedEntries) !== JSON.stringify(git.trackedEntries) ||
@@ -398,10 +491,6 @@ async function applyLocal(params: SupportParams, requested?: HarnessAgent[]): Pr
       throw new Error('Project state changed before acquiring the local setup lock; retry with current state.')
     }
     const noLongerOwned = Object.keys(local.fileHashes).filter((path) => !Object.prototype.hasOwnProperty.call(owned, path))
-    if (noLongerOwned.length) {
-      const cleanup = await removeLocalAgentExcludes(root, noLongerOwned)
-      report.warnings.push(...cleanup.warnings)
-    }
     if (Object.keys(owned).length) {
       const excludes = await configureLocalAgentExcludes(root, Object.keys(owned))
       report.warnings.push(...excludes.warnings)
@@ -418,16 +507,57 @@ async function applyLocal(params: SupportParams, requested?: HarnessAgent[]): Pr
     for (const item of writable) {
       const current = await checkLocalPath(root, item.file.path)
       if (item.before ? !current?.equals(item.before) : current !== undefined) throw new Error(`Local target changed after preflight: ${item.file.path}. Retry setup.`)
-      await mkdir(dirname(join(root, item.file.path)), { recursive: true })
-      await writeFile(join(root, item.file.path), item.file.content, { mode: item.file.mode, flag: current ? 'w' : 'wx' })
+      await safeWriteAgentFile(root, item.file.path, item.file.content, item.file.mode, current)
       report.written.push(item.file.path)
     }
     report.fileHashes = owned
     const finalized = await persistLocal(git, journal, { version: 1, agents: localAgents, fileHashes: owned })
+    if (noLongerOwned.length) {
+      const cleanup = await removeLocalAgentExcludes(root, noLongerOwned)
+      report.warnings.push(...cleanup.warnings)
+    }
     const localStateChanged = journalChanged || finalized
     return { scope: 'local', configuredAgents: effective, sharedAgents, localAgents, report, manifestChanged: false, localStateChanged }
+  } catch (error) {
+    primaryFailure = error
+    if (params.adoption) throw adoptionFailure('local', report, error)
+    throw error
   } finally {
-    await lock.close()
-    await unlink(lockPath)
+    await releaseLock(lock, lockPath, report, primaryFailure)
   }
+}
+
+function adoptionFailure(scope: string, report: AgentInstructionsReport, cause: unknown): Error {
+  return Object.assign(new Error(`The ${scope} adoption stopped before completion. Inspect the partial report and generate a fresh preview before retrying.`), {
+    report,
+    recovery: 'Original instructions remain protected. Exact generated files can be reused; reconcile changed files before retry. Configuration may have been saved if only the final cleanup failed.',
+    cause
+  })
+}
+
+function planDigest(plan: AgentInstructionPlan): string {
+  return hash(Buffer.from(JSON.stringify(plan.files.map((file) => [file.path, file.mode, hash(file.content)]))))
+}
+
+async function releaseLock(lock: Awaited<ReturnType<typeof open>>, path: string, report?: AgentInstructionsReport, primaryFailure?: unknown): Promise<void> {
+  let cleanupFailure: unknown
+  try {
+    await lock.close()
+  } catch (error) {
+    cleanupFailure = error
+  }
+  try {
+    await unlink(path)
+  } catch (error) {
+    cleanupFailure ??= error
+  }
+  if (!cleanupFailure) return
+  const warning = 'Agent setup lock cleanup failed. Inspect the lock before retrying; do not remove a lock held by another running setup.'
+  report?.warnings.push(warning)
+  if (!primaryFailure)
+    throw Object.assign(new Error(warning), {
+      report,
+      recovery: 'Files or inventory may already be saved; inspect the report and generate a fresh preview after resolving the lock.',
+      cause: cleanupFailure
+    })
 }

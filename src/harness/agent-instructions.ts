@@ -317,7 +317,8 @@ export async function planAgentInstructions({ targetPath, agents, manifest, refe
   const inspected = await inspectInstructionFiles(targetPath)
   const instructionSource = inspected.report
   const effectiveReferenceOnly =
-    referenceOnly || inspected.referenceOnly ||
+    referenceOnly ||
+    inspected.referenceOnly ||
     manifest?.fileHashes?.['AGENTS.md'] === hashFileContent(ADOPTION_COMMON_INSTRUCTIONS) ||
     manifest?.fileHashes?.['CLAUDE.md'] === hashFileContent(CODEX_SOURCE_CLAUDE_BRIDGE)
   const needsShared = profiles.some((profile) => profile.sharedInstructions)
