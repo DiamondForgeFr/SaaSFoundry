@@ -135,4 +135,28 @@ describe('compiled sf agents commands', () => {
       git('worktree', 'remove', '--force', sibling)
     }
   })
+  it('lists the versioned catalog without requiring a managed project or writing files', async () => {
+    await rm(join(project, '.saasfoundry.json'))
+    const result = run('catalog', '--json')
+    expect(result.status).toBe(0)
+    const catalog = JSON.parse(result.stdout)
+    expect(catalog.registryVersion).toBe(1)
+    expect(catalog.runtime).toBe('not-checked')
+    expect(catalog.profiles.map((profile: { id: string }) => profile.id)).toEqual(expect.arrayContaining(['gemini-cli', 'qwen-code', 'generic']))
+    expect(catalog.profiles.every((profile: { runtime: string }) => profile.runtime === 'not-checked')).toBe(true)
+    await expect(readFile(join(project, 'AGENTS.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+  it('enables registry profiles without coupling instructions to a model or provider', async () => {
+    for (const agent of ['gemini-cli', 'qwen-code', 'generic']) {
+      const result = run('enable', agent, '--scope', 'shared', '--json')
+      if (result.status !== 0) throw new Error(result.stdout + result.stderr)
+    }
+    expect(await readFile(join(project, 'GEMINI.md'), 'utf8')).toContain('@AGENTS.md')
+    const before = await readFile(join(project, '.saasfoundry.json'), 'utf8')
+    expect(JSON.parse(run('list', '--json').stdout).configuredAgents).toEqual(expect.arrayContaining(['claude-code', 'gemini-cli', 'qwen-code', 'generic']))
+    expect(run('refresh', '--scope', 'shared').status).toBe(0)
+    expect(await readFile(join(project, '.saasfoundry.json'), 'utf8')).toBe(before)
+    expect(run('enable', 'deepseek', '--scope', 'shared').status).not.toBe(0)
+    expect(await readFile(join(project, '.saasfoundry.json'), 'utf8')).toBe(before)
+  })
 })

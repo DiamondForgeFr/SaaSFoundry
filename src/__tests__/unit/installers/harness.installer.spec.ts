@@ -3,7 +3,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 
 import { installHarness, installWorkflowArtifacts } from '../../../installers/harness.installer'
-import { WorkflowConfig } from '../../../types'
+import { HarnessAgent, WorkflowConfig } from '../../../types'
 import { fileExists } from '../../../utils'
 
 const WORKFLOW: WorkflowConfig = {
@@ -128,16 +128,22 @@ describe('harness installer', () => {
       expect(await fileExists(join(dir, '.agents'))).toBe(false)
     })
 
-    it('does not reinstall customized Claude skills when adding another agent', async () => {
+    it.each(['codex', 'gemini-cli', 'qwen-code', 'generic'] as const)('does not reinstall customized Claude skills when adding %s', async (agent) => {
       await installHarness({ targetPath: dir, ...params })
       const path = join(dir, '.claude', 'skills', 'sf-git-commit', 'SKILL.md')
       const customized = '# Custom commit procedure\nUse the project workflow.\n'
       await writeFile(path, customized)
       const instructions = await readFile(join(dir, 'CLAUDE.md'), 'utf8')
-      await installHarness({ targetPath: dir, ...params, agents: ['codex'] })
+      await installHarness({ targetPath: dir, ...params, agents: [agent] })
       expect(await readFile(path, 'utf8')).toBe(customized)
       expect(await readFile(join(dir, 'CLAUDE.md'), 'utf8')).toBe(instructions)
       expect(await readFile(join(dir, '.agents', 'skills', 'sf-git-commit', 'SKILL.md'), 'utf8')).toContain('Custom commit procedure')
+    })
+
+    it('rejects unknown mixed agent selections before depositing the legacy harness', async () => {
+      await expect(installHarness({ targetPath: dir, ...params, agents: ['codex', 'unknown-agent' as HarnessAgent] })).rejects.toThrow()
+      expect(await fileExists(join(dir, 'CLAUDE.md'))).toBe(false)
+      expect(await fileExists(join(dir, '.claude'))).toBe(false)
     })
 
     it('reports a partial existing harness before changing its files', async () => {
@@ -190,6 +196,7 @@ describe('computeHarnessFileHashes', () => {
     await writeFile(join(dir, '.agents', 'skills', 'sf-example', 'SKILL.md'), 'managed')
     await writeFile(join(dir, '.agents', 'skills', 'user-example', 'SKILL.md'), 'user')
     await writeFile(join(dir, 'AGENTS.md'), 'user-owned entry point')
+    await writeFile(join(dir, 'GEMINI.md'), 'user-owned Gemini entry point')
     const { computeHarnessFileHashes } = await import('../../../installers/harness.installer')
     expect(Object.keys(await computeHarnessFileHashes(dir))).toEqual([])
   })

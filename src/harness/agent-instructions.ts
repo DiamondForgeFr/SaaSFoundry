@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 import { lstat, mkdir, readFile, readdir, writeFile } from 'fs/promises'
 import { dirname, join, posix, resolve } from 'path'
 
+import { getAgentProfile, needsSharedInstructions } from './agent-registry'
 import { HarnessAgent, skillsTemplatesPath } from '../types'
 import { hashFileContent } from '../utils'
 
@@ -215,7 +216,12 @@ export interface AgentInstructionPlan {
 export async function planAgentInstructions({ targetPath, agents, manifest }: InstallAgentInstructionsParams): Promise<AgentInstructionPlan> {
   const report: AgentInstructionsReport = { written: [], unchanged: [], conflicts: [], warnings: [], fileHashes: {} }
   const plan: AgentInstructionPlan = { files: [], warnings: report.warnings }
-  if (!agents.some((agent) => agent === 'codex' || agent === 'kimi')) return plan
+  const profiles = [...new Set(agents)].map((agent) => getAgentProfile(agent))
+  if (!needsSharedInstructions(agents)) return plan
+  for (const profile of profiles) {
+    report.warnings.push(...profile.limitations.map((limitation) => `${profile.displayName}: ${limitation}`))
+    if (profile.instructions === 'manual') report.warnings.push(`${profile.displayName}: Manual instruction loading is required; runtime discovery is not checked.`)
+  }
   const baselines = manifest?.fileHashes ?? {}
   try {
     await readFile(join(targetPath, 'CLAUDE.md'), 'utf8')
@@ -225,6 +231,10 @@ export async function planAgentInstructions({ targetPath, agents, manifest }: In
     return plan
   }
   plan.files.push({ path: 'AGENTS.md', content: Buffer.from(COMMON_INSTRUCTIONS), mode: 0o644 })
+  const wrappers = new Set(profiles.filter((profile) => profile.sharedInstructions && profile.instructionFile !== 'AGENTS.md').map((profile) => profile.instructionFile))
+  for (const path of wrappers) {
+    plan.files.push({ path, content: Buffer.from('# SaaSFoundry shared instructions\n\n@AGENTS.md\n'), mode: 0o644 })
+  }
   const source = '.claude/skills'
   if (await hasLinkedAncestor(targetPath, source)) {
     report.warnings.push(`${source}: symbolic link source skipped; use regular installed harness files.`)

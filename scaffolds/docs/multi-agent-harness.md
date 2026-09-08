@@ -35,3 +35,11 @@ Runtime discovery must be verified in the actual agent. Filesystem and installer
 Use `sf agents enable codex --scope shared`, then `sf agents enable kimi claude-code --scope shared` to retain all three agents. `sf agents list --json` separates configured support from discovered files and does not claim runtime verification. `sf agents refresh --scope shared` refreshes the retained set after changes to common skills.
 
 For personal use, run `sf agents enable codex` (local by default) at the Git checkout root. Local setup preserves tracked files and the shared manifest, and isolates personal selections and exclusions by worktree. A tracked destination needing changes blocks local setup. Explicit shared setup makes its artifacts reviewable in Git and retains support for fresh clones. Unmanaged repository adoption belongs to #649. Unknown agent names and unsupported scopes are rejected before mutation. Existing user files and host settings are preserved; conflicts return a nonzero exit and reconciliation paths. The optional manifest inventory survives `sf update`, and repeated operations do not rewrite unchanged files.
+
+## Extensible tool profiles
+
+Use `sf agents catalog --json` to inspect versioned profiles, declared discovery support and limitations. Available profiles include Claude Code, Codex, Kimi, Gemini CLI, Qwen Code and an explicitly unverified generic profile. All retain `runtime: not-checked` until capabilities are tested in the actual host.
+
+Profiles identify coding tools, not model brands. Configure model/provider selection in the tool's personal settings. For an unknown tool, `sf agents enable generic --scope shared` deposits portable instructions to load manually; it does not certify tool execution or workflow compliance. Existing local/shared scope rules still apply.
+
+Gemini receives a small GEMINI.md import of AGENTS.md. Qwen reads AGENTS.md directly, with explicit shared-skill reading fallback. The common source remains CLAUDE.md during this compatibility phase. Adding a profile must preserve this one-way instruction chain, user files, safe path constraints and workflow guards.

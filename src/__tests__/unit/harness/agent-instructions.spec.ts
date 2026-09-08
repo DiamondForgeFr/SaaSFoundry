@@ -2,7 +2,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from '
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 
-import { installAgentInstructions } from '../../../harness/agent-instructions'
+import { HarnessAgent, installAgentInstructions } from '../../../harness/agent-instructions'
 
 const SKILL = `---
 name: commit
@@ -63,6 +63,44 @@ describe('shared agent instructions', () => {
   it('is opt-in and does not generate files for Claude-only configuration', async () => {
     expect((await installAgentInstructions({ targetPath: root, agents: ['claude-code'] })).written).toEqual([])
     await expect(get('AGENTS.md')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('adds a Gemini import wrapper and keeps repeated installation idempotent', async () => {
+    const result = await installAgentInstructions({ targetPath: root, agents: ['gemini-cli'] })
+    expect(await get('GEMINI.md')).toBe('# SaaSFoundry shared instructions\n\n@AGENTS.md\n')
+    expect(await get('AGENTS.md')).toContain('Read `CLAUDE.md`')
+    expect(result.fileHashes['GEMINI.md']).toBeDefined()
+    const repeat = await installAgentInstructions({ targetPath: root, agents: ['gemini-cli', 'codex'], manifest: { fileHashes: result.fileHashes } })
+    expect(repeat.written).toEqual([])
+    expect(repeat.conflicts).toEqual([])
+    expect(repeat.unchanged).toContain('GEMINI.md')
+  })
+
+  it('preserves a customized Gemini wrapper and proposes a reconciliation sidecar', async () => {
+    const first = await installAgentInstructions({ targetPath: root, agents: ['gemini-cli'] })
+    await put('GEMINI.md', '# Personal Gemini instructions\n')
+    const result = await installAgentInstructions({ targetPath: root, agents: ['gemini-cli'], manifest: { fileHashes: first.fileHashes } })
+    expect(result.conflicts).toEqual(['GEMINI.md'])
+    expect(result.fileHashes['GEMINI.md']).toBeUndefined()
+    expect(await get('GEMINI.md')).toBe('# Personal Gemini instructions\n')
+    expect(await get('GEMINI.md.saasfoundry.new')).toContain('@AGENTS.md')
+  })
+
+  it.each(['qwen-code', 'generic'] as const)('renders portable instructions for %s without a Gemini wrapper', async (agent) => {
+    const result = await installAgentInstructions({ targetPath: root, agents: [agent] })
+    expect(result.written).toContain('AGENTS.md')
+    expect(result.written).toContain('.agents/skills/sf-git-commit/SKILL.md')
+    await expect(get('GEMINI.md')).rejects.toMatchObject({ code: 'ENOENT' })
+    if (agent === 'generic') {
+      expect(result.warnings.join('\n')).toMatch(/manual/i)
+      expect(result.warnings.join('\n')).toMatch(/not verified|unverified|not checked|not-checked/i)
+    }
+  })
+
+  it('rejects an unknown agent after a recognized one before writing discovery files', async () => {
+    await expect(installAgentInstructions({ targetPath: root, agents: ['codex', 'unknown-agent' as HarnessAgent] })).rejects.toThrow()
+    await expect(get('AGENTS.md')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(get('.agents/skills/sf-git-commit/SKILL.md')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('supports legacy workflow skills without frontmatter and reports remaining tool examples', async () => {

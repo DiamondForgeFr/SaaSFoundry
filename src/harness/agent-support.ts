@@ -4,10 +4,11 @@ import { dirname, join, resolve } from 'path'
 
 import { AgentInstructionsReport, HarnessAgent, installAgentInstructions, planAgentInstructions, AgentInstructionFile } from './agent-instructions'
 import { inspectGitAgentScope, configureLocalAgentExcludes, removeLocalAgentExcludes, NotGitRepositoryError, GitAgentScope } from './git-agent-scope'
+import { getAgentIds, isHarnessAgent, getSharedAgentEntrypoints } from './agent-registry'
 import { harnessInstallerMeta } from '../installers/harness.installer'
 import { SaaSFoundryManifest } from '../types'
 
-const AGENTS: HarnessAgent[] = ['claude-code', 'codex', 'kimi']
+const AGENTS = getAgentIds()
 
 export interface AgentSupportInventory {
   configuredAgents: HarnessAgent[]
@@ -39,8 +40,8 @@ interface ManifestSnapshot {
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
 function validateAgents(agents: unknown): asserts agents is HarnessAgent[] {
-  if (!Array.isArray(agents) || agents.length === 0 || agents.some((agent) => typeof agent !== 'string' || !AGENTS.includes(agent as HarnessAgent))) {
-    throw new Error('Choose coding agents: claude-code, codex, kimi. Model names and CLI installations are not agent support configurations.')
+  if (!Array.isArray(agents) || agents.length === 0 || agents.some((agent) => !isHarnessAgent(agent))) {
+    throw new Error(`Choose coding agents from the registered tool profiles: ${AGENTS.join(', ')}. Use sf agents catalog for profiles. Model/provider names are not tool identifiers.`)
   }
 }
 
@@ -257,7 +258,11 @@ async function readLocalState(git: GitAgentScope): Promise<LocalAgentState> {
   const validHashes = (value: unknown): boolean =>
     isObject(value) &&
     !Object.entries(value).some(
-      ([path, hash]) => !(path === 'AGENTS.md' || /^\.agents\/skills\/[a-zA-Z0-9_.\/-]+$/.test(path)) || path.split('/').includes('..') || typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)
+      ([path, hash]) =>
+        !(getSharedAgentEntrypoints().includes(path) || /^\.agents\/skills\/[a-zA-Z0-9_.\/-]+$/.test(path)) ||
+        path.split('/').includes('..') ||
+        typeof hash !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(hash)
     )
   if (
     !isObject(state) ||

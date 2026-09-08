@@ -133,16 +133,18 @@ describe('updateCommand (integration)', () => {
     await writeFile(shared, 'customized shared workflow\n')
     await writeFile(privateSkill, 'private user procedure\n')
     await writeFile('AGENTS.md', 'customized agent entry point\n')
+    await writeFile('GEMINI.md', 'customized Gemini entry point\n')
     // An unchanged tracked shared file would otherwise be deleted because
     // generic scaffold regeneration does not produce shared-agent adapters.
     await writeFile('.agents/skills/sf-workflow/reference.md', 'shared reference\n')
     const sharedHashes = {
       [hashKey(shared)]: hashFileContent('original shared workflow\n'),
       'AGENTS.md': hashFileContent('original agent entry point\n'),
+      'GEMINI.md': hashFileContent('original Gemini entry point\n'),
       [hashKey('.agents/skills/sf-workflow/reference.md')]: hashFileContent('shared reference\n')
     }
     const manifest = buildBaseManifest({ version: mode === 'template-refresh' ? '0.0.1' : cliVersion, manifestVersion: targetManifestVersion(), fileHashes: sharedHashes })
-    manifest.modules = { ...manifest.modules, harness: { version: 1, agents: ['claude-code', 'codex', 'kimi'] } }
+    manifest.modules = { ...manifest.modules, harness: { version: 1, agents: ['claude-code', 'codex', 'kimi', 'gemini-cli'] } }
     await writeFile('.saasfoundry.json', JSON.stringify(manifest))
 
     // Exercise native Windows hash keys on any host while keeping real files
@@ -163,6 +165,7 @@ describe('updateCommand (integration)', () => {
       expect(saved.fileHashes[hashKey(privateSkill)]).toBeUndefined()
       expect(await readFile(shared, 'utf8')).toBe('customized shared workflow\n')
       expect(await readFile('AGENTS.md', 'utf8')).toBe('customized agent entry point\n')
+      expect(await readFile('GEMINI.md', 'utf8')).toBe('customized Gemini entry point\n')
       expect(await readFile('.agents/skills/sf-workflow/reference.md', 'utf8')).toBe('shared reference\n')
       if (mode === 'module-install') expect(mockedInstallAnalytics).toHaveBeenCalledTimes(1)
       expect(errorSpy).not.toHaveBeenCalled()
