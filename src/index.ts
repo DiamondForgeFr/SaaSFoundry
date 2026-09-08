@@ -13,6 +13,7 @@ import { docsCommand } from './commands/docs'
 import { resumeCommand } from './commands/resume'
 import { statusCommand } from './commands/status'
 import { workflowCommand } from './commands/workflow'
+import { registerAgentCommands } from './commands/agents'
 import { maybeEmitStaleSkillWarning } from './skill/warn'
 
 void maybeEmitStaleSkillWarning(process.argv, version)
@@ -161,6 +162,7 @@ program
   .option('--no-network', 'Skip any network-dependent checks')
   .option('--check-gh', 'Probe for the GitHub CLI (gh) in PATH')
   .action((opts) => statusCommand(opts))
+registerAgentCommands(program.command('agents').description('Manage additive coding-agent support on an existing harness'))
 program
   .command('workflow')
   .description('Manage workflow configuration and AI rules')

@@ -108,6 +108,28 @@ describe('updateCommand — harness deposits refresh (FLOW 1b)', () => {
     expect(manifest.fileHashes[stalePath]).toBe(hashFileContent(refreshed))
   })
 
+  it('preserves enabled agents and shared baselines without adopting customized shared files', async () => {
+    const hashes = await installTrackedHarness()
+    const sharedPath = '.agents/skills/sf-example/SKILL.md'
+    await mkdir(join(projectDir, '.agents/skills/sf-example'), { recursive: true })
+    await writeFile(join(projectDir, sharedPath), 'custom shared instructions\n')
+    await writeFile(join(projectDir, 'AGENTS.md'), 'custom agent entry point\n')
+    const baseline = hashFileContent('original shared instructions\n')
+    const entryBaseline = hashFileContent('original entry point\n')
+    const harness = { version: 1, agents: ['claude-code', 'codex', 'kimi'] as ('claude-code' | 'codex' | 'kimi')[] }
+    await writeManifest({ modules: { harness, advancedSkills: ['context7'] }, fileHashes: { ...hashes, [sharedPath]: baseline, 'AGENTS.md': entryBaseline } })
+
+    await updateCommand({ nonInteractive: true })
+
+    const manifest = await readManifest()
+    expect(manifest.modules.harness).toEqual(harness)
+    expect(manifest.modules.advancedSkills).toEqual(['context7'])
+    expect(manifest.fileHashes[sharedPath]).toBe(baseline)
+    expect(manifest.fileHashes['AGENTS.md']).toBe(entryBaseline)
+    expect(await readFile(join(projectDir, sharedPath), 'utf8')).toBe('custom shared instructions\n')
+    expect(await readFile(join(projectDir, 'AGENTS.md'), 'utf8')).toBe('custom agent entry point\n')
+  })
+
   it('writes a sidecar for a user-edited deposit, never overwriting it', async () => {
     const hashes = await installTrackedHarness()
 

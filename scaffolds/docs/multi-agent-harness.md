@@ -4,7 +4,7 @@ The shared-instructions foundation adds Codex and Kimi entry points alongside th
 
 ## Current scope
 
-This foundation exposes an installer API. User-facing enablement and local/shared CLI options are tracked by #647 and #648; adoption and refresh orchestration by #649; capability diagnostics by #650; the full compatibility matrix by #651. These commands are not available yet.
+This foundation exposes an installer API and additive `sf agents` commands for managed projects with explicit shared scope (#647). Local scope is tracked by #648; unmanaged adoption by #649; capability diagnostics by #650; the full compatibility matrix by #651.
 
 For a newly generated harness, `installHarness` accepts an optional `agents` array with `claude-code`, `codex`, and `kimi`. Omitting it preserves existing installation behavior. For an existing harness, `installAgentInstructions` adds the instruction surfaces without reinstalling its legacy files.
 
@@ -29,3 +29,9 @@ Claude's session and prompt hooks are not automatically installed for another ag
 A developer can alternate agents on one completed piece of work without changing the project's supported agents. For simultaneous implementation on different changes, use separate branches and worktrees. Share the board and SRS, and hand off the ticket, branch, completed checks and remaining work explicitly.
 
 Runtime discovery must be verified in the actual agent. Filesystem and installer tests establish that the expected files exist; they do not establish that a particular desktop or CLI version loaded them.
+
+## Additive enablement on managed projects
+
+Use `sf agents enable codex --scope shared`, then `sf agents enable kimi claude-code --scope shared` to retain all three agents. `sf agents list --json` separates configured support from discovered files and does not claim runtime verification. `sf agents refresh --scope shared` refreshes the retained set after changes to common skills.
+
+Shared scope is explicit in this delivery. Local configuration belongs to #648 and unmanaged repository adoption to #649. Unknown agent names and unsupported scopes are rejected before mutation. Existing user files and host settings are preserved; conflicts return a nonzero exit and reconciliation paths. The optional manifest inventory survives `sf update`, and repeated operations do not rewrite unchanged files.
