@@ -1,8 +1,9 @@
 import { createHash } from 'crypto'
-import { lstat, mkdir, readFile, readdir, writeFile } from 'fs/promises'
-import { dirname, join, posix, resolve } from 'path'
+import { lstat, readFile, readdir } from 'fs/promises'
+import { join, posix, resolve } from 'path'
 
-import { getAgentProfile, needsSharedInstructions } from './agent-registry'
+import { safeWriteAgentFile } from './agent-file-writer'
+import { getAgentProfile } from './agent-registry'
 import { HarnessAgent, skillsTemplatesPath } from '../types'
 import { hashFileContent } from '../utils'
 
@@ -19,10 +20,24 @@ export interface AgentInstructionsReport {
   fileHashes: Record<string, string>
 }
 
+export class AgentInstructionsError extends Error {
+  readonly cause: unknown
+  readonly report: AgentInstructionsReport
+
+  constructor(path: string, report: AgentInstructionsReport, cause: unknown) {
+    super(`Failed to install ${path}. Inspect the destination and the partial report, then retry the agent instruction installation.`)
+    this.name = 'AgentInstructionsError'
+    this.cause = cause
+    this.report = report
+  }
+}
+
 export interface InstallAgentInstructionsParams {
   targetPath: string
   agents: HarnessAgent[]
   manifest?: { fileHashes?: Record<string, string> }
+  /** Adoption references source instructions without copying or normalizing skills. */
+  referenceOnly?: boolean
 }
 
 const CAPABILITIES = `## Execution capabilities
@@ -41,7 +56,7 @@ Legacy /task examples name roles: use native delegation if available and authori
 or perform the role's work sequentially with the review limitation stated above.
 `
 
-const COMMON_INSTRUCTIONS = `# SaaSFoundry agent instructions
+export const COMMON_INSTRUCTIONS = `# SaaSFoundry agent instructions
 
 Read \`CLAUDE.md\` in this project before working: it remains the authoritative project
 instructions during this additive compatibility phase. Read files that it references as well.
@@ -57,6 +72,40 @@ Commit and push before AI testing; preserve Human testing requirements and merge
 
 ${CAPABILITIES}`
 
+export const CODEX_SOURCE_CLAUDE_BRIDGE = `# SaaSFoundry Claude compatibility instructions
+
+@AGENTS.md
+
+Read \`AGENTS.md\` as the authoritative project instructions and follow every file it
+references. Claude Code must load applicable procedures manually from
+\`.agents/skills/*/SKILL.md\`; do not copy skills into \`.claude/skills\`.
+
+${CAPABILITIES}
+Do not copy or change agent settings, hooks, permissions, credentials, secrets or models.
+`
+
+export const ADOPTION_COMMON_INSTRUCTIONS = `# SaaSFoundry agent adoption instructions
+
+Read \`CLAUDE.md\` in this project before working: it remains the authoritative project
+instructions. Read every file it references. Load applicable procedures manually from
+\`.claude/skills/*/SKILL.md\`; do not copy or normalize them into another skill directory.
+
+Read \`.saasfoundry.json\` and run \`sf status --claude-friendly --no-network\` before
+asking about configured scope, tools or modules. Follow its output language and workflow.
+Before a status transition, read the matching status document and execute the guarded CLI:
+\`.claude/skills/sf-workflow/workflow-cli.sh\`. Use its configured board tool and preserve
+all workflow guards, tests and approval requirements.
+
+${CAPABILITIES}
+Do not copy or change agent settings, hooks, permissions, credentials, secrets or models.
+`
+
+export interface InstructionSourceReport {
+  source: 'claude' | 'codex' | 'mixed' | 'missing'
+  claudeInstructions: boolean
+  sharedInstructions: boolean
+}
+
 /** Refuse links in destinations, including linked ancestor directories. */
 async function hasLinkedAncestor(root: string, relativePath: string): Promise<boolean> {
   let current = resolve(root)
@@ -70,6 +119,55 @@ async function hasLinkedAncestor(root: string, relativePath: string): Promise<bo
     }
   }
   return false
+}
+
+async function readInstructionFile(root: string, path: 'CLAUDE.md' | 'AGENTS.md'): Promise<Buffer | undefined> {
+  if (await hasLinkedAncestor(root, path)) throw new Error(`${path}: symbolic links are not allowed while inspecting instruction sources.`)
+  const fullPath = join(root, path)
+  try {
+    const stat = await lstat(fullPath)
+    if (!stat.isFile()) throw new Error(`${path}: expected a regular instruction file.`)
+    return await readFile(fullPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
+interface InspectedInstructionSource {
+  report: InstructionSourceReport
+  referenceOnly: boolean
+}
+
+async function inspectInstructionFiles(targetPath: string): Promise<InspectedInstructionSource> {
+  const [claude, shared] = await Promise.all([readInstructionFile(targetPath, 'CLAUDE.md'), readInstructionFile(targetPath, 'AGENTS.md')])
+  const claudeInstructions = claude !== undefined
+  const sharedInstructions = shared !== undefined
+  const generatedClaudeBridge = claude?.equals(Buffer.from(CODEX_SOURCE_CLAUDE_BRIDGE)) ?? false
+  const generatedAdoptionBridge = shared?.equals(Buffer.from(ADOPTION_COMMON_INSTRUCTIONS)) ?? false
+  const generatedSharedBridge = generatedAdoptionBridge || (shared?.equals(Buffer.from(COMMON_INSTRUCTIONS)) ?? false)
+
+  if (generatedClaudeBridge && generatedSharedBridge) {
+    throw new Error('CLAUDE.md and AGENTS.md form a generated instruction cycle; reconcile the authoritative instructions before retrying.')
+  }
+  if (generatedClaudeBridge && !sharedInstructions) {
+    throw new Error('CLAUDE.md is a dangling generated bridge because AGENTS.md is missing; restore or reconcile the authoritative instructions before retrying.')
+  }
+  if (generatedSharedBridge && !claudeInstructions) {
+    throw new Error('AGENTS.md is a dangling generated bridge because CLAUDE.md is missing; restore or reconcile the authoritative instructions before retrying.')
+  }
+
+  let source: InstructionSourceReport['source']
+  if (!claudeInstructions && !sharedInstructions) source = 'missing'
+  else if (generatedClaudeBridge || (!claudeInstructions && sharedInstructions)) source = 'codex'
+  else if (generatedSharedBridge || (claudeInstructions && !sharedInstructions)) source = 'claude'
+  else source = 'mixed'
+  return { report: { source, claudeInstructions, sharedInstructions }, referenceOnly: generatedAdoptionBridge }
+}
+
+/** Identify the authoritative root without following links or interpreting user text. */
+export async function inspectInstructionSource(targetPath: string): Promise<InstructionSourceReport> {
+  return (await inspectInstructionFiles(targetPath)).report
 }
 
 /**
@@ -109,7 +207,7 @@ async function deposit(root: string, path: string, content: Buffer, mode: number
       return
     }
     try {
-      await writeFile(join(root, sidecar), content, { flag: 'wx', mode })
+      await safeWriteAgentFile(root, sidecar, content, mode)
       report.warnings.push(`${path}: user content preserved; reconcile ${sidecar}.`)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
@@ -117,8 +215,7 @@ async function deposit(root: string, path: string, content: Buffer, mode: number
     }
     return
   }
-  await mkdir(dirname(fullPath), { recursive: true })
-  await writeFile(fullPath, content, { mode })
+  await safeWriteAgentFile(root, path, content, mode, current)
   report.written.push(path)
   report.fileHashes[path] = hash
 }
@@ -213,28 +310,44 @@ export interface AgentInstructionPlan {
 }
 
 /** Render the complete candidate set without changing the target project. */
-export async function planAgentInstructions({ targetPath, agents, manifest }: InstallAgentInstructionsParams): Promise<AgentInstructionPlan> {
+export async function planAgentInstructions({ targetPath, agents, manifest, referenceOnly = false }: InstallAgentInstructionsParams): Promise<AgentInstructionPlan> {
   const report: AgentInstructionsReport = { written: [], unchanged: [], conflicts: [], warnings: [], fileHashes: {} }
   const plan: AgentInstructionPlan = { files: [], warnings: report.warnings }
   const profiles = [...new Set(agents)].map((agent) => getAgentProfile(agent))
-  if (!needsSharedInstructions(agents)) return plan
+  const inspected = await inspectInstructionFiles(targetPath)
+  const instructionSource = inspected.report
+  const effectiveReferenceOnly =
+    referenceOnly || inspected.referenceOnly ||
+    manifest?.fileHashes?.['AGENTS.md'] === hashFileContent(ADOPTION_COMMON_INSTRUCTIONS) ||
+    manifest?.fileHashes?.['CLAUDE.md'] === hashFileContent(CODEX_SOURCE_CLAUDE_BRIDGE)
+  const needsShared = profiles.some((profile) => profile.sharedInstructions)
+  const needsClaudeBridge = instructionSource.source === 'codex' && profiles.some((profile) => profile.id === 'claude-code')
+  if (!needsShared && !needsClaudeBridge) return plan
   for (const profile of profiles) {
-    report.warnings.push(...profile.limitations.map((limitation) => `${profile.displayName}: ${limitation}`))
+    const limitations =
+      instructionSource.source === 'codex' && profile.id === 'claude-code' ? profile.limitations.filter((limitation) => !limitation.startsWith('Existing Claude instructions')) : profile.limitations
+    report.warnings.push(...limitations.map((limitation) => `${profile.displayName}: ${limitation}`))
     if (profile.instructions === 'manual') report.warnings.push(`${profile.displayName}: Manual instruction loading is required; runtime discovery is not checked.`)
   }
   const baselines = manifest?.fileHashes ?? {}
-  try {
-    await readFile(join(targetPath, 'CLAUDE.md'), 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    report.warnings.push('CLAUDE.md is missing: deposit the existing project harness before installing shared instructions.')
+  if (instructionSource.source === 'missing') {
+    report.warnings.push('CLAUDE.md and AGENTS.md are missing: deposit or author the project instructions before installing compatibility bridges.')
     return plan
   }
-  plan.files.push({ path: 'AGENTS.md', content: Buffer.from(COMMON_INSTRUCTIONS), mode: 0o644 })
   const wrappers = new Set(profiles.filter((profile) => profile.sharedInstructions && profile.instructionFile !== 'AGENTS.md').map((profile) => profile.instructionFile))
+  if (instructionSource.source === 'codex') {
+    if (needsClaudeBridge) plan.files.push({ path: 'CLAUDE.md', content: Buffer.from(CODEX_SOURCE_CLAUDE_BRIDGE), mode: 0o644 })
+    for (const path of wrappers) plan.files.push({ path, content: Buffer.from('# SaaSFoundry shared instructions\n\n@AGENTS.md\n'), mode: 0o644 })
+    return plan
+  }
+  if (instructionSource.source === 'mixed') {
+    report.warnings.push('CLAUDE.md and AGENTS.md both contain custom instructions. Reconcile their authority manually; AGENTS.md will be reported as a normal conflict.')
+  }
+  plan.files.push({ path: 'AGENTS.md', content: Buffer.from(effectiveReferenceOnly ? ADOPTION_COMMON_INSTRUCTIONS : COMMON_INSTRUCTIONS), mode: 0o644 })
   for (const path of wrappers) {
     plan.files.push({ path, content: Buffer.from('# SaaSFoundry shared instructions\n\n@AGENTS.md\n'), mode: 0o644 })
   }
+  if (effectiveReferenceOnly) return plan
   const source = '.claude/skills'
   if (await hasLinkedAncestor(targetPath, source)) {
     report.warnings.push(`${source}: symbolic link source skipped; use regular installed harness files.`)
@@ -305,7 +418,18 @@ export async function planAgentInstructions({ targetPath, agents, manifest }: In
 
 export async function installAgentInstructions(params: InstallAgentInstructionsParams): Promise<AgentInstructionsReport> {
   const plan = await planAgentInstructions(params)
-  const report: AgentInstructionsReport = { written: [], unchanged: [], conflicts: [], warnings: plan.warnings, fileHashes: {} }
-  for (const file of plan.files) await deposit(params.targetPath, file.path, file.content, file.mode, params.manifest?.fileHashes ?? {}, report)
+  return installPlannedAgentInstructions(params.targetPath, plan, params.manifest?.fileHashes)
+}
+
+/** Apply an already reviewed render without inspecting or rendering the source again. */
+export async function installPlannedAgentInstructions(targetPath: string, plan: AgentInstructionPlan, baselines: Record<string, string> = {}): Promise<AgentInstructionsReport> {
+  const report: AgentInstructionsReport = { written: [], unchanged: [], conflicts: [], warnings: [...plan.warnings], fileHashes: {} }
+  for (const file of plan.files) {
+    try {
+      await deposit(targetPath, file.path, file.content, file.mode, baselines, report)
+    } catch (error) {
+      throw new AgentInstructionsError(file.path, report, error)
+    }
+  }
   return report
 }
