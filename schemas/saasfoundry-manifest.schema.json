@@ -123,6 +123,16 @@
             "version": {
               "type": "integer",
               "minimum": 0
+            },
+            "agents": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": ["claude-code", "codex", "kimi"]
+              },
+              "description": "Additive shared agent support. Omission preserves legacy harness behavior."
             }
           }
         },
