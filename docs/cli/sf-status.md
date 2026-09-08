@@ -5,7 +5,7 @@ Report the current SaaSFoundryAI project state and workflow preconditions (manif
 ## Usage
 
 ```bash
-sf status [--json | --claude-friendly] [--check-gh] [--no-network]
+sf status [--json] [--agent-friendly | --claude-friendly] [--check-gh] [--no-network]
 ```
 
 ## Options
@@ -13,7 +13,8 @@ sf status [--json | --claude-friendly] [--check-gh] [--no-network]
 | Flag                | Description                                                               | Default |
 | ------------------- | ------------------------------------------------------------------------- | ------- |
 | `--json`            | Machine-readable JSON report (fails with exit code 1 on any `fail` check) | -       |
-| `--claude-friendly` | Markdown report tailored for Claude Code SessionStart hooks (exit code 0) | -       |
+| `--agent-friendly`  | Markdown report for initialization in any agent host (exit code 0)        | -       |
+| `--claude-friendly` | Compatible alias for `--agent-friendly`; existing hooks keep working      | -       |
 | `--no-network`      | Skip network-dependent checks                                             | -       |
 | `--check-gh`        | Probe for `gh` (GitHub CLI) availability in `$PATH`                       | off     |
 
@@ -59,14 +60,20 @@ sf status --json
 ```
 
 ```bash
-# Claude Code SessionStart hook usage
-sf status --claude-friendly --check-gh
+# Explicit initialization in any coding agent
+sf status --agent-friendly --no-network
 ```
 
 ## Exit codes
 
-- `0` — All preconditions pass, or `--claude-friendly` was used (it never fails)
+- `0` — All preconditions pass, or either friendly flag was used (both preserve the hook-compatible non-failing exit behavior)
 - `1` — At least one precondition has status `fail` (default or `--json` output)
+
+Friendly output can contain failing preconditions even though its process exits successfully. The agent must read and act on those checks. When `--json` and either friendly flag are combined, JSON
+output wins and the friendly exit behavior is retained, matching the legacy alias.
+
+The listed skills are filesystem inventory; this report does not prove native skill discovery or hook execution. Use [`sf agents doctor`](./sf-agents.md#diagnosing-agent-capabilities) to distinguish
+artifact checks from host capabilities.
 
 ## See also
 

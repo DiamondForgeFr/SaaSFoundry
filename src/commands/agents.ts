@@ -2,12 +2,14 @@ import { Command } from 'commander'
 import { AGENT_REGISTRY_VERSION, getAgentIds, listAgentProfiles } from '../harness/agent-registry'
 import { enableAgents, readAgentSupport, refreshAgents } from '../harness/agent-support'
 import { applyAgentAdoption, planAgentAdoption } from '../harness/agent-adoption'
+import { collectAgentDiagnostics, type DiagnosticCheck } from '../harness/agent-diagnostics'
 
 interface AgentCommandOptions {
   json?: boolean
   scope?: string
   apply?: boolean
   plan?: string
+  checkRuntime?: boolean
 }
 
 function errorPayload(error: unknown): { error: string; report?: unknown; recovery?: unknown } {
@@ -65,10 +67,43 @@ async function adoptAgents(agents: string[], options: AgentCommandOptions): Prom
   }
 }
 
-export async function agentsCommand(action: 'enable' | 'refresh' | 'list' | 'catalog' | 'adopt', agents: string[] = [], options: AgentCommandOptions = {}): Promise<void> {
+function writeDiagnosticCheck(check: DiagnosticCheck, indent = ''): void {
+  process.stdout.write(`${indent}[${check.status}] ${check.id}\n`)
+  process.stdout.write(`${indent}  Evidence: ${check.summary}\n`)
+  if (check.remediation) process.stdout.write(`${indent}  Remediation: ${check.remediation}\n`)
+}
+
+async function doctorAgents(agents: string[], options: AgentCommandOptions): Promise<void> {
+  const report = await collectAgentDiagnostics(process.cwd(), {
+    ...(agents.length ? { agents } : {}),
+    checkRuntime: options.checkRuntime === true
+  })
+  if (options.json) process.stdout.write(JSON.stringify(report, null, 2) + '\n')
+  else {
+    process.stdout.write('Agent diagnostics (read-only)\n')
+    process.stdout.write('These checks do not assure runtime activation, native instruction or skill loading, hook execution, authentication, permissions, delegation, or workflow execution.\n')
+    process.stdout.write('\nProject checks\n')
+    for (const check of report.checks) writeDiagnosticCheck(check, '  ')
+    for (const agent of report.agents) {
+      process.stdout.write(`\n${agent.id}\n`)
+      for (const check of agent.checks) writeDiagnosticCheck(check, '  ')
+    }
+    if (report.initialization.length) {
+      process.stdout.write('\nInitialization required\n')
+      for (const instruction of report.initialization) process.stdout.write(`  - ${instruction}\n`)
+    }
+  }
+  if ([...report.checks, ...report.agents.flatMap((agent) => agent.checks)].some((check) => check.status === 'failed')) process.exitCode = 1
+}
+
+export async function agentsCommand(action: 'enable' | 'refresh' | 'list' | 'catalog' | 'adopt' | 'doctor', agents: string[] = [], options: AgentCommandOptions = {}): Promise<void> {
   try {
     if (action === 'adopt') {
       await adoptAgents(agents, options)
+      return
+    }
+    if (action === 'doctor') {
+      await doctorAgents(agents, options)
       return
     }
     if (action === 'catalog') {
@@ -115,6 +150,13 @@ export async function agentsCommand(action: 'enable' | 'refresh' | 'list' | 'cat
 }
 
 export function registerAgentCommands(command: Command): void {
+  command
+    .command('doctor')
+    .description('Diagnose local agent artifacts and declared capabilities without changing the project')
+    .argument('[agents...]', getAgentIds().join(', '))
+    .option('--check-runtime', 'Check for declared executables in PATH without running them')
+    .option('--json', 'Output only the machine-readable diagnostic report')
+    .action((agents: string[], options: AgentCommandOptions) => agentsCommand('doctor', agents, options))
   command
     .command('adopt')
     .description('Preview or apply additive agent support to an existing repository')

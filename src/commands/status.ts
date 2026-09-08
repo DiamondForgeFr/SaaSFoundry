@@ -1,15 +1,17 @@
 import { collectStatus } from '../status/collect'
 import { evaluatePreconditions } from '../status/preconditions'
-import { renderClaudeFriendly, renderHuman, renderJson } from '../status/render'
+import { renderAgentFriendly, renderHuman, renderJson } from '../status/render'
 
 export interface StatusCommandOptions {
   json?: boolean
+  agentFriendly?: boolean
   claudeFriendly?: boolean
   network?: boolean
   checkGh?: boolean
 }
 
 export async function statusCommand(options: StatusCommandOptions = {}): Promise<void> {
+  const agentFriendly = options.agentFriendly || options.claudeFriendly
   const report = await collectStatus(process.cwd(), {
     checkNetwork: options.network !== false,
     checkGh: options.checkGh === true
@@ -19,14 +21,14 @@ export async function statusCommand(options: StatusCommandOptions = {}): Promise
 
   if (options.json) {
     process.stdout.write(renderJson(payload) + '\n')
-  } else if (options.claudeFriendly) {
-    process.stdout.write(renderClaudeFriendly(payload))
+  } else if (agentFriendly) {
+    process.stdout.write(renderAgentFriendly(payload))
   } else {
     process.stdout.write(renderHuman(payload))
   }
 
   const hasFail = preconditions.some((p) => p.status === 'fail')
-  if (hasFail && !options.claudeFriendly) {
+  if (hasFail && !agentFriendly) {
     process.exitCode = 1
   }
 }

@@ -5,6 +5,10 @@ import { tmpdir } from 'os'
 import { statusCommand } from '../../commands/status'
 import { writeManifest } from '../../utils'
 import type { SaaSFoundryManifest } from '../../types'
+import { execFileSync, spawnSync } from 'child_process'
+import { resolve } from 'path'
+
+const CLI_ROOT = resolve(__dirname, '../../..')
 
 function captureStdout(): { stop: () => string } {
   const originalWrite = process.stdout.write.bind(process.stdout)
@@ -25,6 +29,10 @@ describe('status command (E2E)', () => {
   let tempDir: string
   let originalCwd: string
   let originalExitCode: typeof process.exitCode
+
+  beforeAll(() => {
+    execFileSync(process.execPath, [join(CLI_ROOT, 'node_modules/typescript/bin/tsc')], { cwd: CLI_ROOT, stdio: 'pipe' })
+  })
 
   beforeEach(async () => {
     tempDir = join(tmpdir(), `sf-e2e-status-${Date.now()}-${Math.random().toString(36).slice(2)}`)
@@ -76,5 +84,26 @@ describe('status command (E2E)', () => {
     await statusCommand({ claudeFriendly: true })
     cap.stop()
     expect(process.exitCode).toBe(0)
+  })
+
+  it('accepts both compiled CLI aliases with identical output and failure semantics', () => {
+    const run = (...args: string[]) => spawnSync(process.execPath, [join(CLI_ROOT, 'bin/sf.js'), 'status', '--no-network', ...args], { cwd: tempDir, encoding: 'utf8' })
+    const neutral = run('--agent-friendly')
+    const legacy = run('--claude-friendly')
+    expect(neutral.status).toBe(0)
+    expect(neutral.stderr).toBe('')
+    expect(neutral.stdout).toBe(legacy.stdout)
+    expect(legacy.status).toBe(0)
+    expect(neutral.stdout).toContain('[fail]')
+    expect(neutral.stdout).toContain('How to use this output')
+
+    const json = run('--json')
+    const neutralJson = run('--json', '--agent-friendly')
+    const legacyJson = run('--json', '--claude-friendly')
+    expect(json.status).toBe(1)
+    expect(neutralJson.status).toBe(0)
+    expect(legacyJson.status).toBe(0)
+    expect(JSON.parse(neutralJson.stdout)).toEqual(JSON.parse(json.stdout))
+    expect(neutralJson.stdout).toBe(legacyJson.stdout)
   })
 })

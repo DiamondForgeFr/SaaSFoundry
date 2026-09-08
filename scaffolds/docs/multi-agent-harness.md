@@ -1,12 +1,12 @@
 # Shared agent instructions
 
-The shared-instructions foundation adds Codex and Kimi entry points alongside the existing Claude harness. It does not select an exclusive agent for the project. All agents use the configured workflow and SRS backend and invoke the same guarded CLI scripts.
+The shared-instructions foundation adds Codex and Kimi entry points alongside the existing Claude harness. It does not select an exclusive agent for the project. The adapters direct configured agents to use the project's workflow and SRS backend through the same guarded CLI scripts; verify instruction loading and actual invocation in the host.
 
 ## Current scope
 
 This foundation exposes an installer API and additive `sf agents` commands for managed projects. Local scope is the default; shared scope is explicit. Existing repositories can start with
-`sf agents adopt <agents...>`, which previews a bounded adoption plan without writing and applies only with the exact returned plan ID. Capability diagnostics are tracked by #650 and the full
-compatibility matrix by #651.
+`sf agents adopt <agents...>`, which previews a bounded adoption plan without writing and applies only with the exact returned plan ID. `sf agents doctor [agents...]` diagnoses local artifacts and
+distinguishes them from unverified host capabilities. The full compatibility matrix is tracked by #651.
 
 For a newly generated harness, `installHarness` accepts an optional `agents` array with `claude-code`, `codex`, and `kimi`. Omitting it preserves existing installation behavior. For an existing harness, `installAgentInstructions` adds the instruction surfaces without reinstalling its legacy files.
 
@@ -22,11 +22,24 @@ The installer returns generated-file hashes for its caller to retain as the refr
 
 ## Workflow and access
 
-Run `sf status --claude-friendly --no-network` before work; the option is still named for Claude but its Markdown report can be read by every agent. Read the applicable workflow status file and use the project workflow CLI for transitions. Skill content is guidance; the CLI guards remain the common enforcement layer.
+Run `sf status --agent-friendly --no-network` before work; `--claude-friendly` remains a compatible alias. Both flags return Markdown with a non-failing process exit code, so read and resolve any failing preconditions in the output. Read the applicable workflow status file and use the project workflow CLI for transitions. Skill content is guidance; the CLI guards remain the common enforcement layer.
 
 GitHub and SRS credentials are resolved by the existing CLIs. Do not copy secrets into agent instructions, settings, or the repository. Each agent's sandbox and approval rules still apply. Installed files alone do not demonstrate that Git push, network access, or all hooks work in a particular host.
 
 Claude's session and prompt hooks are not automatically installed for another agent. Other agents must perform the initialization procedure explicitly until a tested native hook adapter exists. Delegation depends on the host's tools; a sequential review is not equivalent to an independent review required by the workflow.
+
+### Manual session initialization
+
+1. Read the selected agent entrypoint and every referenced project instruction, then `.saasfoundry.json` for configured tools, workflow and language.
+2. Run `sf status --agent-friendly --no-network`, resolve its preconditions, and inspect `sf agents doctor <tool-id>`.
+3. Read applicable skills explicitly until native discovery is verified. Use the retained procedure directory named by the instructions; adoption may intentionally have no copied skills.
+4. Read the current workflow status document and call the existing guarded workflow CLI with `status <ticket>`. Missing workflow scripts require configuration through `sf workflow`, not direct board mutations.
+5. Check required access through the configured connectors and their credential resolvers. The existence of credentials or a script does not verify authentication, permissions or guard execution.
+6. Verify hooks in the actual host. Until verified, repeat initialization each session and apply SRS/workflow trigger procedures manually. Keep the host's sandbox and approval controls.
+
+`sf agents doctor --json` distinguishes `supported`, `unavailable`, `not-checked` and `failed` checks. Supported artifact evidence is not proof of native discovery. `--check-runtime` finds executable files in PATH without launching them, and does not certify a runtime session. No network, hook execution, login or file changes are performed by doctor.
+
+Native delegation must be available and authorized in the current host. Disclose sequential fallback when needed. A required independent review remains incomplete until a separate authorized agent context or independent human reviewer performs it; do not advance past AI testing on self-review alone. Diagnostics do not configure models, effort or routing policy.
 
 ## Team usage
 

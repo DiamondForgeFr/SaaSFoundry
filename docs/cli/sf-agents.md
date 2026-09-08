@@ -35,12 +35,13 @@ runtimes or probe their native discovery behavior.
 
 ## Commands
 
-| Command                                      | Behavior                                                          |
-| -------------------------------------------- | ----------------------------------------------------------------- |
-| `adopt <agents...> [--scope local\|shared]`  | Plans by default; applies only with `--apply --plan <id>`.        |
-| `enable <agents...> [--scope local\|shared]` | Adds support in the selected scope; defaults to local.            |
-| `refresh [--scope local\|shared]`            | Refreshes instructions in that scope; defaults to local.          |
-| `list`                                       | Reports shared, local and effective agents plus discovered files. |
+| Command                                      | Behavior                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `adopt <agents...> [--scope local\|shared]`  | Plans by default; applies only with `--apply --plan <id>`.                           |
+| `enable <agents...> [--scope local\|shared]` | Adds support in the selected scope; defaults to local.                               |
+| `refresh [--scope local\|shared]`            | Refreshes instructions in that scope; defaults to local.                             |
+| `list`                                       | Reports shared, local and effective agents plus discovered files.                    |
+| `doctor [agents...]`                         | Diagnoses artifact evidence and unverified host capabilities without changing files. |
 
 All commands accept `--json`. `list` is read-only and reports runtime discovery as `not-checked`.
 
@@ -77,6 +78,57 @@ generated wrappers receive managed baselines.
 
 Adoption is additive. There is no automatic removal command: removing an adapter is a separate deliberate operation because user edits, shared history, and local exclusions must be evaluated at that
 time.
+
+## Diagnosing agent capabilities
+
+```bash
+sf agents doctor codex claude-code
+sf agents doctor --json
+sf agents doctor codex --check-runtime --json
+```
+
+`doctor` reports all registered profiles by default, or only the explicitly requested tool IDs. It works in partial repositories and never selects an active model. It reads local evidence without
+installing anything, changing files, running hooks, logging in or contacting services. `--check-runtime` only looks for executable files in PATH; it does not launch them. A desktop or IDE host can
+work without a corresponding CLI in PATH.
+
+The versioned JSON report separates project checks from each agent's checks and includes initialization instructions. Each check has a stable ID, status, explanation and, where relevant, remediation:
+
+Executable lookup is bounded to 64 KiB and 256 PATH entries. Windows executable-extension lookup is currently reported as `not-checked`; verify availability in the actual host. Shared registration is
+read from the manifest; checkout-private registration remains `not-checked` and can be inspected separately with `sf agents list --json`.
+
+| Status        | Meaning                                                                                                    |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| `supported`   | The stated static evidence was found, such as an instruction artifact. It does not certify host execution. |
+| `unavailable` | The checked artifact or executable was not found. Follow the remediation when it is needed.                |
+| `not-checked` | No reliable observation was made, including native discovery, hooks, authentication and delegation.        |
+| `failed`      | Inspection encountered an invalid or unsafe surface, or another diagnostic failure.                        |
+
+Exit code `1` reports a failed check or invalid request; `0` means the report was produced without a failed check. Missing artifacts and unverified host capabilities can still appear in a report that
+exits `0`: read each check before working. File presence, vendor-documented support, executable availability and actual host behavior are distinct facts.
+
+### Initialize a session when hooks are missing or unverified
+
+1. Load the chosen entrypoint (`CLAUDE.md`, `AGENTS.md` or `GEMINI.md`) and every project instruction it references. Read `.saasfoundry.json` for the workflow, SRS backend and output language.
+   Reconcile missing or conflicting instructions before implementation.
+2. Run `sf status --agent-friendly --no-network` and act on its preconditions. The friendly flag retains an exit code of zero for hook compatibility; a `fail` in its output still requires resolution.
+   Existing `--claude-friendly` hooks remain compatible.
+3. Run `sf agents doctor <tool-id>`. Read applicable skills explicitly if native discovery has not been verified. Reference-only adoption can intentionally keep procedures in the original
+   `.claude/skills` or `.agents/skills` directory; an absent copy is not permission to invent a replacement process.
+4. Read the project's workflow skill and current status document, then call the existing guarded workflow CLI with `status <ticket>`. Use the CLI selected by those instructions for transitions. A
+   script's existence does not prove its guard ran. If required scripts are missing, resolve the prerequisite through `sf workflow` before transitions; never replace them with direct board mutations.
+5. Validate required GitHub/SRS access through the configured connector or its existing read-only status command. Authentication, repository access and Projects permissions are separate checks. Let
+   existing credential resolvers work; never paste tokens into diagnostic reports. Respect the host's sandbox, network and approval controls.
+6. Verify hook events in the actual host before relying on them. Until then, repeat these initialization steps manually in each session and explicitly apply the SRS/workflow procedures when their
+   triggers occur.
+
+### Delegation and independent review
+
+Use native delegation when the current host exposes it and the user's authorization permits it. CLI detection cannot establish that delegation is available, authorized or has remaining capacity. If it
+is unavailable, disclose the limitation and perform eligible implementation or research steps sequentially.
+
+Sequential self-review does **not** satisfy an independent-review requirement. For a complex ticket, report that requirement as incomplete and remain in AI testing until a separate authorized agent
+context or independent human reviewer performs it. Do not downgrade complexity, bypass guards or count repeated self-reviews as independent reviewers. Model and effort choices remain host-side
+decisions; this command does not configure routing rules.
 
 ## Git exclusions and worktrees
 
