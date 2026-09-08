@@ -130,7 +130,7 @@
               "uniqueItems": true,
               "items": {
                 "type": "string",
-                "enum": ["claude-code", "codex", "kimi"]
+                "enum": ["claude-code", "codex", "kimi", "gemini-cli", "qwen-code", "generic"]
               },
               "description": "Additive shared agent support. Omission preserves legacy harness behavior."
             }
