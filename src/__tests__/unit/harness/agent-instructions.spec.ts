@@ -2,7 +2,17 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from '
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 
-import { HarnessAgent, installAgentInstructions } from '../../../harness/agent-instructions'
+import {
+  ADOPTION_COMMON_INSTRUCTIONS,
+  AgentInstructionsError,
+  CODEX_SOURCE_CLAUDE_BRIDGE,
+  COMMON_INSTRUCTIONS,
+  HarnessAgent,
+  inspectInstructionSource,
+  installAgentInstructions,
+  installPlannedAgentInstructions,
+  planAgentInstructions
+} from '../../../harness/agent-instructions'
 
 const SKILL = `---
 name: commit
@@ -63,6 +73,149 @@ describe('shared agent instructions', () => {
   it('is opt-in and does not generate files for Claude-only configuration', async () => {
     expect((await installAgentInstructions({ targetPath: root, agents: ['claude-code'] })).written).toEqual([])
     await expect(get('AGENTS.md')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('identifies missing, Claude, Codex and mixed instruction sources from regular files', async () => {
+    expect(await inspectInstructionSource(root)).toEqual({ source: 'claude', claudeInstructions: true, sharedInstructions: false })
+    await put('AGENTS.md', '# Codex rules\n')
+    expect(await inspectInstructionSource(root)).toEqual({ source: 'mixed', claudeInstructions: true, sharedInstructions: true })
+    await rm(join(root, 'CLAUDE.md'))
+    expect(await inspectInstructionSource(root)).toEqual({ source: 'codex', claudeInstructions: false, sharedInstructions: true })
+    await rm(join(root, 'AGENTS.md'))
+    expect(await inspectInstructionSource(root)).toEqual({ source: 'missing', claudeInstructions: false, sharedInstructions: false })
+  })
+
+  it('adopts a Codex source additively without changing its instructions or copying agent-private files', async () => {
+    const original = Buffer.from('# Codex project rules\n\x00keep exact bytes\n')
+    await rm(join(root, 'CLAUDE.md'))
+    await writeFile(join(root, 'AGENTS.md'), original)
+    await put('.agents/skills/sf-private/SKILL.md', '# Private shared skill')
+    await put('.agents/skills/sf-private/credentials.json', 'secret-value')
+
+    const result = await installAgentInstructions({ targetPath: root, agents: ['claude-code', 'gemini-cli'] })
+
+    expect(await readFile(join(root, 'AGENTS.md'))).toEqual(original)
+    expect(await get('CLAUDE.md')).toBe(CODEX_SOURCE_CLAUDE_BRIDGE)
+    expect(await get('GEMINI.md')).toBe('# SaaSFoundry shared instructions\n\n@AGENTS.md\n')
+    expect(result.written).toEqual(['CLAUDE.md', 'GEMINI.md'])
+    await expect(get('.claude/skills/sf-private/SKILL.md')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(get('.claude/settings.json')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await get('.agents/skills/sf-private/credentials.json')).toBe('secret-value')
+  })
+
+  it('does not add the Claude bridge when Claude Code was not requested for a Codex source', async () => {
+    await rm(join(root, 'CLAUDE.md'))
+    await put('AGENTS.md', '# Authoritative Codex rules\n')
+    const result = await installAgentInstructions({ targetPath: root, agents: ['codex', 'gemini-cli'] })
+    expect(result.written).toEqual(['GEMINI.md'])
+    await expect(get('CLAUDE.md')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('keeps a Codex-source Claude bridge stable across repeated refreshes', async () => {
+    await rm(join(root, 'CLAUDE.md'))
+    await put('AGENTS.md', '# Authoritative Codex rules\n')
+    const first = await installAgentInstructions({ targetPath: root, agents: ['claude-code', 'gemini-cli'] })
+    const second = await installAgentInstructions({
+      targetPath: root,
+      agents: ['claude-code', 'gemini-cli'],
+      manifest: { fileHashes: first.fileHashes }
+    })
+    expect(second.written).toEqual([])
+    expect(second.conflicts).toEqual([])
+    expect(second.unchanged).toEqual(['CLAUDE.md', 'GEMINI.md'])
+    expect(await inspectInstructionSource(root)).toEqual({ source: 'codex', claudeInstructions: true, sharedInstructions: true })
+  })
+
+  it('preserves mixed custom roots and reports AGENTS.md as a normal reconciliation conflict', async () => {
+    const claude = await get('CLAUDE.md')
+    await put('AGENTS.md', '# Independent Codex rules\n')
+    const result = await installAgentInstructions({ targetPath: root, agents: ['codex'] })
+    expect(result.conflicts).toContain('AGENTS.md')
+    expect(result.warnings.join('\n')).toMatch(/reconcile their authority manually/i)
+    expect(await get('CLAUDE.md')).toBe(claude)
+    expect(await get('AGENTS.md')).toBe('# Independent Codex rules\n')
+    expect(await get('AGENTS.md.saasfoundry.new')).toBe(COMMON_INSTRUCTIONS)
+  })
+
+  it('does not invent an instruction source when both roots are missing', async () => {
+    await rm(join(root, 'CLAUDE.md'))
+    const plan = await planAgentInstructions({ targetPath: root, agents: ['codex'] })
+    expect(plan.files).toEqual([])
+    expect(plan.warnings.join('\n')).toMatch(/CLAUDE\.md and AGENTS\.md are missing/i)
+  })
+
+  it('allows a Claude source without installed compatibility skills and warns explicitly', async () => {
+    await rm(join(root, '.claude/skills'), { recursive: true })
+    const result = await installAgentInstructions({ targetPath: root, agents: ['codex'] })
+    expect(result.written).toEqual(['AGENTS.md'])
+    expect(result.warnings).toContain('.claude/skills: no installed compatibility skills found.')
+  })
+
+  it('renders adoption as references only and never copies inline credentials from known bundled files', async () => {
+    const skill = '# Workflow\nTOKEN=inline-skill-secret\n'
+    const script = '#!/bin/sh\nTOKEN=inline-script-secret\n'
+    await put('.claude/skills/sf-workflow/SKILL.md', skill)
+    await put('.claude/skills/sf-workflow/workflow-cli.sh', script)
+
+    const result = await installAgentInstructions({ targetPath: root, agents: ['codex', 'gemini-cli'], referenceOnly: true })
+
+    expect(result.written).toEqual(['AGENTS.md', 'GEMINI.md'])
+    expect(await get('AGENTS.md')).toBe(ADOPTION_COMMON_INSTRUCTIONS)
+    expect(await get('AGENTS.md')).toContain('.claude/skills/*/SKILL.md')
+    expect(await get('AGENTS.md')).toContain('.claude/skills/sf-workflow/workflow-cli.sh')
+    expect(await get('AGENTS.md')).toContain('## Execution capabilities')
+    expect(await get('.claude/skills/sf-workflow/SKILL.md')).toBe(skill)
+    expect(await get('.claude/skills/sf-workflow/workflow-cli.sh')).toBe(script)
+    await expect(get('.agents/skills/sf-workflow/SKILL.md')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(get('.agents/skills/sf-workflow/workflow-cli.sh')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('infers reference-only refresh from the exact adoption bridge and includes custom Claude skills', async () => {
+    await put('.claude/skills/project-custom/SKILL.md', '# Custom procedure\n')
+    const first = await installAgentInstructions({ targetPath: root, agents: ['codex'], referenceOnly: true })
+    const secondPlan = await planAgentInstructions({ targetPath: root, agents: ['codex'], manifest: { fileHashes: first.fileHashes } })
+    expect(secondPlan.files.map((file) => file.path)).toEqual(['AGENTS.md'])
+    expect(secondPlan.files[0].content.toString()).toContain('.claude/skills/*/SKILL.md')
+    const second = await installPlannedAgentInstructions(root, secondPlan, first.fileHashes)
+    expect(second.written).toEqual([])
+    expect(second.conflicts).toEqual([])
+    expect(second.unchanged).toEqual(['AGENTS.md'])
+    await expect(get('.agents/skills/project-custom/SKILL.md')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each([
+    ['generated Claude bridge', 'CLAUDE.md', CODEX_SOURCE_CLAUDE_BRIDGE, /dangling generated bridge/i],
+    ['generated shared bridge', 'AGENTS.md', COMMON_INSTRUCTIONS, /dangling generated bridge/i],
+    ['generated adoption bridge', 'AGENTS.md', ADOPTION_COMMON_INSTRUCTIONS, /dangling generated bridge/i]
+  ])('rejects a dangling %s before planning files', async (_name, path, content, expected) => {
+    await rm(join(root, 'CLAUDE.md'))
+    await put(path, content)
+    await expect(planAgentInstructions({ targetPath: root, agents: ['codex', 'claude-code'] })).rejects.toThrow(expected)
+    await expect(get('GEMINI.md')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each([COMMON_INSTRUCTIONS, ADOPTION_COMMON_INSTRUCTIONS])('rejects an exact generated instruction cycle before writing files', async (sharedBridge) => {
+    await put('CLAUDE.md', CODEX_SOURCE_CLAUDE_BRIDGE)
+    await put('AGENTS.md', sharedBridge)
+    await expect(installAgentInstructions({ targetPath: root, agents: ['gemini-cli'] })).rejects.toThrow(/instruction cycle/i)
+    await expect(get('GEMINI.md')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('reports partial progress and the failing relative path when a deposit fails', async () => {
+    await put('.agents', 'not a directory')
+    let failure: unknown
+    try {
+      await install()
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(AgentInstructionsError)
+    expect(failure).toMatchObject({
+      message: expect.stringContaining('.agents/skills/sf-git-commit/SKILL.md'),
+      report: { written: ['AGENTS.md'] }
+    })
+    expect((failure as AgentInstructionsError).cause).toBeDefined()
+    expect((failure as Error).message).not.toContain('Custom project')
   })
 
   it('adds a Gemini import wrapper and keeps repeated installation idempotent', async () => {
@@ -209,13 +362,11 @@ describe('shared agent instructions', () => {
     expect(await get('AGENTS.md.saasfoundry.new')).toContain('Read `CLAUDE.md`')
   })
 
-  it('does not traverse destination symlinks or overwrite symlink sidecars', async () => {
+  it('rejects linked instruction roots before traversing any destination', async () => {
     await put('outside/keep.md', '# Keep this')
     await symlink(join(root, 'outside/keep.md'), join(root, 'AGENTS.md'))
     await symlink(join(root, 'outside'), join(root, '.agents'))
-    const result = await install()
-    expect(result.conflicts).toContain('AGENTS.md')
-    expect(result.conflicts).toContain('.agents/skills/sf-git-commit/SKILL.md')
+    await expect(install()).rejects.toThrow(/symbolic links are not allowed/i)
     expect(await get('outside/keep.md')).toBe('# Keep this')
     await expect(get('outside/skills/sf-git-commit/SKILL.md')).rejects.toMatchObject({ code: 'ENOENT' })
   })
