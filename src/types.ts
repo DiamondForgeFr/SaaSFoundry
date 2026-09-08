@@ -1,4 +1,5 @@
 import { resolve } from 'path'
+import type { HarnessAgent } from './harness/agent-registry'
 
 export interface DbCredentials {
   host: string
@@ -300,7 +301,7 @@ export interface ProjectPorts {
   s3Console?: number
 }
 
-export type HarnessAgent = 'claude-code' | 'codex' | 'kimi'
+export type { HarnessAgent } from './harness/agent-registry'
 
 export interface SaaSFoundryManifest {
   $schema?: string

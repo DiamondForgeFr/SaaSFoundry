@@ -1,0 +1,82 @@
+{
+  "registryVersion": 1,
+  "profiles": {
+    "claude-code": {
+      "displayName": "Claude Code",
+      "instructionFile": "CLAUDE.md",
+      "sharedInstructions": false,
+      "instructions": "documented",
+      "skills": "documented",
+      "runtime": "not-checked",
+      "sources": ["https://code.claude.com/docs/en/memory", "https://code.claude.com/docs/en/skills"],
+      "limitations": [
+        "Existing Claude instructions and skills remain the common source during the additive compatibility phase.",
+        "Installed instructions do not verify runtime access, hook execution or permissions."
+      ]
+    },
+    "codex": {
+      "displayName": "Codex",
+      "instructionFile": "AGENTS.md",
+      "sharedInstructions": true,
+      "instructions": "documented",
+      "skills": "documented",
+      "runtime": "not-checked",
+      "sources": ["https://developers.openai.com/codex/guides/agents-md", "https://developers.openai.com/codex/skills"],
+      "limitations": ["Claude-specific hooks and permissions are not transferred.", "Run project preconditions explicitly and verify discovery in the actual host."]
+    },
+    "kimi": {
+      "displayName": "Kimi Code",
+      "instructionFile": "AGENTS.md",
+      "sharedInstructions": true,
+      "instructions": "manual",
+      "skills": "manual",
+      "runtime": "not-checked",
+      "sources": [],
+      "limitations": [
+        "Read AGENTS.md and the applicable .agents/skills procedures explicitly until host discovery is verified.",
+        "This profile configures portable files; it does not install Kimi or select a model."
+      ]
+    },
+    "gemini-cli": {
+      "displayName": "Gemini CLI",
+      "instructionFile": "GEMINI.md",
+      "sharedInstructions": true,
+      "instructions": "documented",
+      "skills": "documented",
+      "runtime": "not-checked",
+      "sources": ["https://geminicli.com/docs/cli/gemini-md/", "https://geminicli.com/docs/cli/skills/"],
+      "limitations": [
+        "GEMINI.md directs the agent to the common AGENTS.md instructions.",
+        "The documented .agents/skills discovery alias does not prove runtime activation or consent.",
+        "No Gemini settings, hooks, provider credentials or model selection are changed."
+      ]
+    },
+    "qwen-code": {
+      "displayName": "Qwen Code",
+      "instructionFile": "AGENTS.md",
+      "sharedInstructions": true,
+      "instructions": "documented",
+      "skills": "manual",
+      "runtime": "not-checked",
+      "sources": ["https://qwenlm.github.io/qwen-code-docs/en/users/features/memory/", "https://qwenlm.github.io/qwen-code-docs/en/users/features/skills/"],
+      "limitations": [
+        "Read applicable .agents/skills procedures explicitly; this profile does not claim native discovery of that shared directory.",
+        "No .qwen settings, hooks, credentials or model choices are installed."
+      ]
+    },
+    "generic": {
+      "displayName": "Generic coding agent",
+      "instructionFile": "AGENTS.md",
+      "sharedInstructions": true,
+      "instructions": "manual",
+      "skills": "manual",
+      "runtime": "not-checked",
+      "sources": [],
+      "limitations": [
+        "Explicitly provide AGENTS.md and applicable .agents/skills procedures to the host.",
+        "Automatic instruction discovery, skill activation, hooks and delegation are not assumed.",
+        "This portable fallback does not identify a model, provider or executable."
+      ]
+    }
+  }
+}
