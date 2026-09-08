@@ -12,7 +12,8 @@ export async function agentsCommand(action: 'enable' | 'refresh' | 'list', agent
       const inventory = await readAgentSupport(process.cwd())
       if (options.json) process.stdout.write(JSON.stringify(inventory, null, 2) + '\n')
       else {
-        process.stdout.write(`Configured shared agents: ${inventory.configuredAgents.join(', ') || '(none recorded)'}\n`)
+        process.stdout.write(`Effective agents: ${inventory.configuredAgents.join(', ') || '(none recorded)'}\n`)
+        process.stdout.write(`Shared agents: ${inventory.sharedAgents.join(', ')}\nLocal agents: ${inventory.localAgents.join(', ') || '(none)'}\n`)
         process.stdout.write(`Discovered files: ${JSON.stringify(inventory.discovered)}\nRuntime discovery: not checked\n`)
       }
       return
@@ -21,7 +22,8 @@ export async function agentsCommand(action: 'enable' | 'refresh' | 'list', agent
     const result = action === 'enable' ? await enableAgents({ ...params, agents }) : await refreshAgents(params)
     if (options.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n')
     else {
-      process.stdout.write(`Configured shared agents: ${result.configuredAgents.join(', ') || '(none recorded)'}\n`)
+      process.stdout.write(`Scope: ${options.scope ?? 'local'}\n`)
+      process.stdout.write(`Effective agents: ${result.configuredAgents.join(', ') || '(none recorded)'}\n`)
       process.stdout.write(`${result.report.written.length} files written, ${result.report.unchanged.length} unchanged, ${result.report.conflicts.length} conflicts.\n`)
       for (const warning of result.report.warnings) process.stderr.write(`Warning: ${warning}\n`)
       for (const conflict of result.report.conflicts) process.stderr.write(`Conflict: ${conflict}\n`)
@@ -40,13 +42,13 @@ export function registerAgentCommands(command: Command): void {
     .command('enable')
     .description('Add support without disabling other configured agents')
     .argument('<agents...>', 'claude-code, codex, kimi')
-    .requiredOption('--scope <scope>', 'Explicit configuration scope: shared (local support is delivered separately)')
+    .option('--scope <scope>', 'Configuration scope: local (default) or shared', 'local')
     .option('--json', 'Output a machine-readable report')
     .action((agents: string[], options: AgentCommandOptions) => agentsCommand('enable', agents, options))
   command
     .command('refresh')
-    .description('Refresh shared instructions for the configured agent set')
-    .requiredOption('--scope <scope>', 'Explicit configuration scope: shared')
+    .description('Refresh instructions in the selected scope')
+    .option('--scope <scope>', 'Configuration scope: local (default) or shared', 'local')
     .option('--json', 'Output a machine-readable report')
     .action((options: AgentCommandOptions) => agentsCommand('refresh', [], options))
   command

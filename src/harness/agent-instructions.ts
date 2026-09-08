@@ -201,22 +201,34 @@ function retainLegacyDocLinks(content: string, skillPath: string): string {
  * Claude files or agent-specific settings are changed. Structural migration and
  * persisted agent selection belong to later lifecycle commands.
  */
-export async function installAgentInstructions({ targetPath, agents, manifest }: InstallAgentInstructionsParams): Promise<AgentInstructionsReport> {
+export interface AgentInstructionFile {
+  path: string
+  content: Buffer
+  mode: number
+}
+export interface AgentInstructionPlan {
+  files: AgentInstructionFile[]
+  warnings: string[]
+}
+
+/** Render the complete candidate set without changing the target project. */
+export async function planAgentInstructions({ targetPath, agents, manifest }: InstallAgentInstructionsParams): Promise<AgentInstructionPlan> {
   const report: AgentInstructionsReport = { written: [], unchanged: [], conflicts: [], warnings: [], fileHashes: {} }
-  if (!agents.some((agent) => agent === 'codex' || agent === 'kimi')) return report
+  const plan: AgentInstructionPlan = { files: [], warnings: report.warnings }
+  if (!agents.some((agent) => agent === 'codex' || agent === 'kimi')) return plan
   const baselines = manifest?.fileHashes ?? {}
   try {
     await readFile(join(targetPath, 'CLAUDE.md'), 'utf8')
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     report.warnings.push('CLAUDE.md is missing: deposit the existing project harness before installing shared instructions.')
-    return report
+    return plan
   }
-  await deposit(targetPath, 'AGENTS.md', Buffer.from(COMMON_INSTRUCTIONS), 0o644, baselines, report)
+  plan.files.push({ path: 'AGENTS.md', content: Buffer.from(COMMON_INSTRUCTIONS), mode: 0o644 })
   const source = '.claude/skills'
   if (await hasLinkedAncestor(targetPath, source)) {
     report.warnings.push(`${source}: symbolic link source skipped; use regular installed harness files.`)
-    return report
+    return plan
   }
   let skills
   try {
@@ -224,7 +236,7 @@ export async function installAgentInstructions({ targetPath, agents, manifest }:
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     report.warnings.push(`${source}: no installed compatibility skills found.`)
-    return report
+    return plan
   }
   for (const skill of skills.sort((a, b) => a.name.localeCompare(b.name))) {
     if (!skill.name.startsWith('sf-')) continue
@@ -272,11 +284,18 @@ export async function installAgentInstructions({ targetPath, agents, manifest }:
           const sourcePath = join(targetPath, source, rel)
           let content = rel === `${skill.name}/SKILL.md` ? Buffer.from(normalized) : await readFile(sourcePath)
           if (rel.endsWith('.md')) content = Buffer.from(retainLegacyDocLinks(content.toString('utf8'), rel))
-          await deposit(targetPath, `.agents/skills/${rel}`, content, (await lstat(sourcePath)).mode & 0o777, baselines, report)
+          plan.files.push({ path: `.agents/skills/${rel}`, content, mode: (await lstat(sourcePath)).mode & 0o777 })
         }
       }
     }
     await copyTree(skill.name)
   }
+  return plan
+}
+
+export async function installAgentInstructions(params: InstallAgentInstructionsParams): Promise<AgentInstructionsReport> {
+  const plan = await planAgentInstructions(params)
+  const report: AgentInstructionsReport = { written: [], unchanged: [], conflicts: [], warnings: plan.warnings, fileHashes: {} }
+  for (const file of plan.files) await deposit(params.targetPath, file.path, file.content, file.mode, params.manifest?.fileHashes ?? {}, report)
   return report
 }
