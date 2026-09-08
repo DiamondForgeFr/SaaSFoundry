@@ -40,6 +40,22 @@ import { version as cliVersion } from '../../package.json'
 import { buildUpdatePrefillFromOptions, ConflictStrategy, parseConflictStrategy, UpdateCommandOptions, UpdateDryRunReport } from './update.options'
 import { runRequired } from '../run'
 
+// Shared agent deposits have their own conflict-aware baselines. Generic
+// scaffold refreshes must neither delete them nor adopt user edits/private skills.
+function isSharedAgentPath(path: string): boolean {
+  const normalized = path.replaceAll('\\', '/')
+  return normalized === 'AGENTS.md' || normalized.startsWith('.agents/')
+}
+
+function withoutSharedAgentHashes(hashes: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(hashes).filter(([path]) => !isSharedAgentPath(path)))
+}
+
+async function refreshProjectHashes(manifest: SaaSFoundryManifest): Promise<Record<string, string>> {
+  const sharedBaselines = Object.fromEntries(Object.entries(manifest.fileHashes ?? {}).filter(([path]) => isSharedAgentPath(path)))
+  return { ...withoutSharedAgentHashes(await computeFileHashes('.')), ...sharedBaselines }
+}
+
 export interface FileUpdate {
   path: string
   action: 'update' | 'add' | 'conflict' | 'remove'
@@ -435,7 +451,7 @@ async function refreshHarnessDeposits(manifest: SaaSFoundryManifest, manifestPat
       // the tracking entirely.
       const untracked = Object.fromEntries(Object.entries(manifest.fileHashes ?? {}).filter(([p]) => !isHarnessTrackedPath(p)))
       manifest.fileHashes = { ...untracked, ...deposit.hashes }
-      manifest.modules = { ...(manifest.modules ?? {}), harness: { version: harnessInstallerMeta.currentVersion } }
+      manifest.modules = { ...(manifest.modules ?? {}), harness: { ...manifest.modules?.harness, version: harnessInstallerMeta.currentVersion } }
       manifest.version = cliVersion
       await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
     }
@@ -596,7 +612,7 @@ export async function updateCommand(opts: UpdateCommandOptions = {}) {
 
         // Three-way comparison
         spinner.text = 'Comparing files...'
-        const updates = computeFileUpdates(manifest.fileHashes, currentHashes, targetHashes)
+        const updates = computeFileUpdates(withoutSharedAgentHashes(manifest.fileHashes), withoutSharedAgentHashes(currentHashes), withoutSharedAgentHashes(targetHashes))
 
         if (updates.length === 0) {
           spinner.succeed(chalk.green('No template changes to apply.'))
@@ -680,7 +696,7 @@ export async function updateCommand(opts: UpdateCommandOptions = {}) {
         if (!dryRun) {
           // Update manifest version and recompute hashes
           manifest.version = cliVersion
-          manifest.fileHashes = await computeFileHashes('.')
+          manifest.fileHashes = await refreshProjectHashes(manifest)
           await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
         }
       } catch (error) {
@@ -916,7 +932,7 @@ export async function updateCommand(opts: UpdateCommandOptions = {}) {
       manifest.aiRules = harnessConfig.aiRules ?? manifest.aiRules
       manifest.modules = {
         ...(manifest.modules ?? {}),
-        harness: { version: harnessInstallerMeta.currentVersion },
+        harness: { ...manifest.modules?.harness, version: harnessInstallerMeta.currentVersion },
         advancedSkills: [...new Set([...(manifest.modules?.advancedSkills ?? []), ...(harnessConfig.advancedSkills ?? [])])]
       }
     }
@@ -1034,7 +1050,7 @@ export async function updateCommand(opts: UpdateCommandOptions = {}) {
     // user's own code as SaaSFoundryAI templates.
     moduleSpinner.text = 'Updating project manifest...'
     if (isScaffoldManifest(manifest)) {
-      manifest.fileHashes = await computeFileHashes('.')
+      manifest.fileHashes = await refreshProjectHashes(manifest)
       if (harnessTargetHashes) {
         // Harness deposits keep their TARGET baseline — the disk sweep would
         // re-absorb a conflicted (sidecar'd) user edit and silently overwrite

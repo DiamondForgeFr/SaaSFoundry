@@ -86,6 +86,7 @@ export default defineConfig({
             { text: 'sf update', link: '/cli/sf-update' },
             { text: 'sf resume', link: '/cli/sf-resume' },
             { text: 'sf status', link: '/cli/sf-status' },
+            { text: 'sf agents', link: '/cli/sf-agents' },
             { text: 'sf docs', link: '/cli/sf-docs' },
             { text: 'sf modules', link: '/cli/sf-modules' },
             { text: 'sf skill', link: '/cli/sf-skill' },

@@ -3,6 +3,8 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import shelljs from 'shelljs'
 
+import { hashFileContent } from '../../../utils'
+
 import { targetManifestVersion } from '../../../migrations/manifest/registry'
 import { SaaSFoundryManifest } from '../../../types'
 import { version as cliVersion } from '../../../../package.json'
@@ -47,7 +49,7 @@ jest.mock('../../../builders/monorepo.builder', () => ({ createMonorepoRoot: jes
 jest.mock('../../../builders/dev-services.builder', () => ({ createDevServicesCompose: jest.fn() }))
 
 jest.mock('ora', () => () => ({
-  start: () => ({ text: '', succeed: jest.fn(), fail: jest.fn() })
+  start: () => ({ text: '', succeed: jest.fn(), fail: jest.fn(), stop: jest.fn() })
 }))
 
 import { updateCommand } from '../../../commands/update'
@@ -114,6 +116,59 @@ describe('updateCommand (integration)', () => {
     exitSpy.mockRestore()
     process.chdir(originalCwd)
     await rm(tempDir, { recursive: true, force: true }).catch(() => {})
+  })
+
+  it.each([
+    ['template-refresh', '/'],
+    ['module-install', '/'],
+    ['template-refresh', '\\'],
+    ['module-install', '\\']
+  ] as const)('preserves shared agent files and their original baselines during %s with %s hash separators', async (mode, separator) => {
+    const hashKey = (path: string) => path.replaceAll('/', separator)
+    mockedGetModuleSelections.mockResolvedValue(mode === 'module-install' ? ['analytics'] : [])
+    const shared = '.agents/skills/sf-workflow/SKILL.md'
+    const privateSkill = '.agents/skills/private/SKILL.md'
+    await mkdir('.agents/skills/sf-workflow', { recursive: true })
+    await mkdir('.agents/skills/private', { recursive: true })
+    await writeFile(shared, 'customized shared workflow\n')
+    await writeFile(privateSkill, 'private user procedure\n')
+    await writeFile('AGENTS.md', 'customized agent entry point\n')
+    // An unchanged tracked shared file would otherwise be deleted because
+    // generic scaffold regeneration does not produce shared-agent adapters.
+    await writeFile('.agents/skills/sf-workflow/reference.md', 'shared reference\n')
+    const sharedHashes = {
+      [hashKey(shared)]: hashFileContent('original shared workflow\n'),
+      'AGENTS.md': hashFileContent('original agent entry point\n'),
+      [hashKey('.agents/skills/sf-workflow/reference.md')]: hashFileContent('shared reference\n')
+    }
+    const manifest = buildBaseManifest({ version: mode === 'template-refresh' ? '0.0.1' : cliVersion, manifestVersion: targetManifestVersion(), fileHashes: sharedHashes })
+    manifest.modules = { ...manifest.modules, harness: { version: 1, agents: ['claude-code', 'codex', 'kimi'] } }
+    await writeFile('.saasfoundry.json', JSON.stringify(manifest))
+
+    // Exercise native Windows hash keys on any host while keeping real files
+    // and the complete update pipeline (including temporary regeneration).
+    const utils = jest.requireMock<typeof import('../../../utils')>('../../../utils')
+    const actualComputeHashes = utils.computeFileHashes
+    const hashSpy = jest.spyOn(utils, 'computeFileHashes').mockImplementation(async (directory) => {
+      const hashes = await actualComputeHashes(directory)
+      return Object.fromEntries(Object.entries(hashes).map(([path, hash]) => [hashKey(path), hash]))
+    })
+    try {
+      await updateCommand({ nonInteractive: true })
+
+      const saved = JSON.parse(await readFile('.saasfoundry.json', 'utf8'))
+      expect(saved.version).toBe(cliVersion)
+      expect(saved.modules.harness).toEqual(manifest.modules.harness)
+      expect(saved.fileHashes).toEqual(expect.objectContaining(sharedHashes))
+      expect(saved.fileHashes[hashKey(privateSkill)]).toBeUndefined()
+      expect(await readFile(shared, 'utf8')).toBe('customized shared workflow\n')
+      expect(await readFile('AGENTS.md', 'utf8')).toBe('customized agent entry point\n')
+      expect(await readFile('.agents/skills/sf-workflow/reference.md', 'utf8')).toBe('shared reference\n')
+      if (mode === 'module-install') expect(mockedInstallAnalytics).toHaveBeenCalledTimes(1)
+      expect(errorSpy).not.toHaveBeenCalled()
+    } finally {
+      hashSpy.mockRestore()
+    }
   })
 
   describe('manifest loading', () => {
