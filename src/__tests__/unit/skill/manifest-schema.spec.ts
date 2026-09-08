@@ -188,3 +188,17 @@ describe('saasfoundry-manifest.schema.json — rejection cases', () => {
     expect(validate({ ...baseManifest, tools: { design: { name: 'figma' } } })).toBe(false)
   })
 })
+
+describe('shared harness agent inventory', () => {
+  it('accepts legacy and additive agent configurations', () => {
+    for (const harness of [{ version: 1 }, { version: 1, agents: ['claude-code', 'codex', 'kimi'] }]) {
+      expect(validate({ ...baseManifest, modules: { harness } })).toBe(true)
+    }
+  })
+
+  it('rejects empty, duplicated, and unsupported agent inventories', () => {
+    for (const agents of [[], ['codex', 'codex'], ['gpt']]) {
+      expect(validate({ ...baseManifest, modules: { harness: { version: 1, agents } } })).toBe(false)
+    }
+  })
+})

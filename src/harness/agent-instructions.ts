@@ -2,12 +2,12 @@ import { createHash } from 'crypto'
 import { lstat, mkdir, readFile, readdir, writeFile } from 'fs/promises'
 import { dirname, join, posix, resolve } from 'path'
 
-import { skillsTemplatesPath } from '../types'
+import { HarnessAgent, skillsTemplatesPath } from '../types'
 import { hashFileContent } from '../utils'
 
 const hashBytes = (content: Buffer): string => createHash('sha256').update(content).digest('hex')
 
-export type HarnessAgent = 'claude-code' | 'codex' | 'kimi'
+export type { HarnessAgent } from '../types'
 
 export interface AgentInstructionsReport {
   written: string[]

@@ -300,6 +300,8 @@ export interface ProjectPorts {
   s3Console?: number
 }
 
+export type HarnessAgent = 'claude-code' | 'codex' | 'kimi'
+
 export interface SaaSFoundryManifest {
   $schema?: string
   // Schema-shape version, monotonic integer, bumped by registered manifest migrations.
@@ -340,6 +342,8 @@ export interface SaaSFoundryManifest {
     // `sf update` can refresh them and module migrations can target them.
     harness?: {
       version: number
+      /** Additive shared support; absence preserves legacy behavior. */
+      agents?: HarnessAgent[]
     }
     // PWA module — makes the generated web app installable as a desktop
     // application through the browser's own flow. Versioned shape (not the flat
@@ -363,7 +367,7 @@ export interface SaaSFoundryManifest {
 
 /** Modules block of a project scaffolded by `sf new` (full/stack profile) — the five stack keys are guaranteed. */
 export type ScaffoldModules = Required<Pick<NonNullable<SaaSFoundryManifest['modules']>, 'email' | 's3Setup' | 'dbSetup' | 'includeAnalytics' | 'advancedSkills'>> & {
-  harness?: { version: number }
+  harness?: { version: number; agents?: HarnessAgent[] }
   // Optional, not part of the guaranteed stack keys: projects scaffolded before the module
   // existed have no `pwa` entry, and `--no-pwa` projects never get one.
   pwa?: { version: number }
