@@ -4,7 +4,7 @@ The shared-instructions foundation adds Codex and Kimi entry points alongside th
 
 ## Current scope
 
-This foundation exposes an installer API and additive `sf agents` commands for managed projects with explicit shared scope (#647). Local scope is tracked by #648; unmanaged adoption by #649; capability diagnostics by #650; the full compatibility matrix by #651.
+This foundation exposes an installer API and additive `sf agents` commands for managed projects. Local scope is the default; shared scope is explicit. Unmanaged adoption is tracked by #649; capability diagnostics by #650; the full compatibility matrix by #651.
 
 For a newly generated harness, `installHarness` accepts an optional `agents` array with `claude-code`, `codex`, and `kimi`. Omitting it preserves existing installation behavior. For an existing harness, `installAgentInstructions` adds the instruction surfaces without reinstalling its legacy files.
 
@@ -14,7 +14,7 @@ The existing `CLAUDE.md` remains the source of project instructions during this 
 
 Existing instructions are user-owned. The adapter reports conflicts instead of overwriting them. Reconcile a proposed `.saasfoundry.new` file before using the affected surface. Existing custom instructions must be reviewed for agent-specific operations: a Markdown file being readable does not make every procedure portable.
 
-The installer returns generated-file hashes for its caller to retain as the refresh baseline. Do not record the hash of a conflicting user file as a successfully installed template. Keep local adapter inventory outside a shared manifest when the local-scope implementation is added.
+The installer returns generated-file hashes for its caller to retain as the refresh baseline. Do not record the hash of a conflicting user file as a successfully installed template. Local adapter inventory lives in the checkout Git directory, outside the shared manifest.
 
 ## Workflow and access
 
@@ -34,4 +34,4 @@ Runtime discovery must be verified in the actual agent. Filesystem and installer
 
 Use `sf agents enable codex --scope shared`, then `sf agents enable kimi claude-code --scope shared` to retain all three agents. `sf agents list --json` separates configured support from discovered files and does not claim runtime verification. `sf agents refresh --scope shared` refreshes the retained set after changes to common skills.
 
-Shared scope is explicit in this delivery. Local configuration belongs to #648 and unmanaged repository adoption to #649. Unknown agent names and unsupported scopes are rejected before mutation. Existing user files and host settings are preserved; conflicts return a nonzero exit and reconciliation paths. The optional manifest inventory survives `sf update`, and repeated operations do not rewrite unchanged files.
+For personal use, run `sf agents enable codex` (local by default) at the Git checkout root. Local setup preserves tracked files and the shared manifest, and isolates personal selections and exclusions by worktree. A tracked destination needing changes blocks local setup. Explicit shared setup makes its artifacts reviewable in Git and retains support for fresh clones. Unmanaged repository adoption belongs to #649. Unknown agent names and unsupported scopes are rejected before mutation. Existing user files and host settings are preserved; conflicts return a nonzero exit and reconciliation paths. The optional manifest inventory survives `sf update`, and repeated operations do not rewrite unchanged files.

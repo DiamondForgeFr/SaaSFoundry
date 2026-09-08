@@ -104,6 +104,8 @@ describe('additive managed agent support (#660)', () => {
   it('reads configured support separately from runtime verification', async () => {
     expect(await readAgentSupport(root)).toEqual({
       configuredAgents: ['claude-code'],
+      sharedAgents: ['claude-code'],
+      localAgents: [],
       discovered: { claudeInstructions: true, sharedInstructions: false, sharedSkills: false },
       runtime: 'not-checked'
     })
@@ -116,9 +118,9 @@ describe('additive managed agent support (#660)', () => {
     expect((await manifest()).modules.harness.version).toBe(1)
     expect(Object.keys((await manifest()).fileHashes).every((key) => key === 'AGENTS.md' || key.startsWith('.agents/'))).toBe(true)
   })
-  it.each([undefined, 'local', 'project', 'SHARED'])('refuses unsupported scope %s before changing files', async (scope) => {
+  it.each(['project', 'SHARED'])('refuses unsupported scope %s before changing files', async (scope) => {
     const before = await get('.saasfoundry.json')
-    await expect(enableAgents({ targetPath: root, agents: ['codex'], scope })).rejects.toThrow('--scope shared')
+    await expect(enableAgents({ targetPath: root, agents: ['codex'], scope })).rejects.toThrow('scope must be')
     expect(await get('.saasfoundry.json')).toBe(before)
     expect(await readdir(root)).toEqual(expect.not.arrayContaining(['AGENTS.md', '.agents', '.saasfoundry.agents.lock']))
   })
