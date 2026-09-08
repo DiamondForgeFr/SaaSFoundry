@@ -300,7 +300,13 @@ async function inspectManifest(root: string, rootSnapshot: Stats): Promise<Manif
 
 async function workflowGuardCheck(root: string, id: string, relativePath: string): Promise<DiagnosticCheck> {
   const metadata = await inspectPath(root, relativePath, 'file')
-  if (metadata.state !== 'present') return metadataCheck(id, relativePath, 'file', metadata)
+  if (metadata.state !== 'present') {
+    const check = metadataCheck(id, relativePath, 'file', metadata)
+    if (metadata.state === 'missing')
+      check.remediation =
+        'Use the existing guarded CLI named by project instructions; these locations are alternatives and require no duplicate copies. If no guarded CLI exists, configure the workflow with `sf workflow` before transitions.'
+    return check
+  }
   if (((metadata.mode ?? 0) & 0o111) === 0) {
     return {
       id,

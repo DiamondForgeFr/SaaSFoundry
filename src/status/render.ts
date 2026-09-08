@@ -95,7 +95,7 @@ export function renderJson(payload: RenderPayload): string {
   return JSON.stringify(out, null, 2)
 }
 
-export function renderClaudeFriendly(payload: RenderPayload): string {
+export function renderAgentFriendly(payload: RenderPayload): string {
   const { report, preconditions } = payload
   const lines: string[] = []
   lines.push('# SaaSFoundryAI project status')
@@ -138,3 +138,6 @@ export function renderClaudeFriendly(payload: RenderPayload): string {
   lines.push('')
   return lines.join('\n')
 }
+
+/** Compatible export for existing integrations and SessionStart hooks. */
+export const renderClaudeFriendly = renderAgentFriendly
