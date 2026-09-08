@@ -39,12 +39,14 @@ import { checkNodeVersion, computeFileHashes, fileExists, getNvmPrefix } from '.
 import { version as cliVersion } from '../../package.json'
 import { buildUpdatePrefillFromOptions, ConflictStrategy, parseConflictStrategy, UpdateCommandOptions, UpdateDryRunReport } from './update.options'
 import { runRequired } from '../run'
+import { getSharedAgentEntrypoints } from '../harness/agent-registry'
 
 // Shared agent deposits have their own conflict-aware baselines. Generic
 // scaffold refreshes must neither delete them nor adopt user edits/private skills.
+const SHARED_AGENT_ENTRYPOINTS = new Set(getSharedAgentEntrypoints())
 function isSharedAgentPath(path: string): boolean {
   const normalized = path.replaceAll('\\', '/')
-  return normalized === 'AGENTS.md' || normalized.startsWith('.agents/')
+  return SHARED_AGENT_ENTRYPOINTS.has(normalized) || normalized.startsWith('.agents/')
 }
 
 function withoutSharedAgentHashes(hashes: Record<string, string>): Record<string, string> {

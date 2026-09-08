@@ -8,6 +8,7 @@ import { installOptionalSkills } from './optional-skills.installer'
 import { installToolSkill } from './tool-skill.installer'
 import { injectWorkflowSection, installWorkflowSkill } from './workflow-skill.installer'
 import { AgentInstructionsReport, HarnessAgent, installAgentInstructions } from '../harness/agent-instructions'
+import { needsSharedInstructions } from '../harness/agent-registry'
 import type { ModuleInstaller } from '../migrations/module/types'
 import { SaaSFoundryManifest, WorkflowConfig, skillsTemplatesPath } from '../types'
 import { ClaudeHooksConfig, mergeClaudeSettingsHooks } from '../utils/claude-settings'
@@ -158,7 +159,7 @@ export async function installHarness({
 }: InstallHarnessParams): Promise<AgentInstructionsReport | undefined> {
   // Adding discovery must not reinstall the user's customized legacy skills.
   // Refreshing those files belongs to the conflict-aware update flow.
-  if (agents?.some((agent) => agent === 'codex' || agent === 'kimi') && (await fileExists(join(targetPath, '.claude', 'skills')))) {
+  if (agents && needsSharedInstructions(agents) && (await fileExists(join(targetPath, '.claude', 'skills')))) {
     if (!(await fileExists(join(targetPath, 'CLAUDE.md')))) {
       throw new Error('Existing Claude skills have no CLAUDE.md instruction source. Reconcile this partial harness before adding shared agent instructions; existing files were left unchanged.')
     }

@@ -1,4 +1,5 @@
 import { Command } from 'commander'
+import { AGENT_REGISTRY_VERSION, getAgentIds, listAgentProfiles } from '../harness/agent-registry'
 import { enableAgents, readAgentSupport, refreshAgents } from '../harness/agent-support'
 
 interface AgentCommandOptions {
@@ -6,8 +7,18 @@ interface AgentCommandOptions {
   scope?: string
 }
 
-export async function agentsCommand(action: 'enable' | 'refresh' | 'list', agents: string[] = [], options: AgentCommandOptions = {}): Promise<void> {
+export async function agentsCommand(action: 'enable' | 'refresh' | 'list' | 'catalog', agents: string[] = [], options: AgentCommandOptions = {}): Promise<void> {
   try {
+    if (action === 'catalog') {
+      const profiles = listAgentProfiles()
+      if (options.json) process.stdout.write(JSON.stringify({ registryVersion: AGENT_REGISTRY_VERSION, runtime: 'not-checked', profiles }, null, 2) + '\n')
+      else {
+        process.stdout.write('Agent tool profiles (runtime capabilities are not checked):\n')
+        for (const profile of profiles) process.stdout.write(`${profile.id}: ${profile.displayName} — ${profile.instructionFile}\n`)
+        process.stdout.write('Use --json for declared support, sources and limitations. Models and providers are configured in your agent tool.\n')
+      }
+      return
+    }
     if (action === 'list') {
       const inventory = await readAgentSupport(process.cwd())
       if (options.json) process.stdout.write(JSON.stringify(inventory, null, 2) + '\n')
@@ -39,9 +50,14 @@ export async function agentsCommand(action: 'enable' | 'refresh' | 'list', agent
 
 export function registerAgentCommands(command: Command): void {
   command
+    .command('catalog')
+    .description('List registered tool profiles and declared support without probing runtimes')
+    .option('--json', 'Output versioned profile metadata')
+    .action((options: AgentCommandOptions) => agentsCommand('catalog', [], options))
+  command
     .command('enable')
     .description('Add support without disabling other configured agents')
-    .argument('<agents...>', 'claude-code, codex, kimi')
+    .argument('<agents...>', getAgentIds().join(', '))
     .option('--scope <scope>', 'Configuration scope: local (default) or shared', 'local')
     .option('--json', 'Output a machine-readable report')
     .action((agents: string[], options: AgentCommandOptions) => agentsCommand('enable', agents, options))
