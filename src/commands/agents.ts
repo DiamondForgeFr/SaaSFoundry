@@ -1,14 +1,76 @@
 import { Command } from 'commander'
 import { AGENT_REGISTRY_VERSION, getAgentIds, listAgentProfiles } from '../harness/agent-registry'
 import { enableAgents, readAgentSupport, refreshAgents } from '../harness/agent-support'
+import { applyAgentAdoption, planAgentAdoption } from '../harness/agent-adoption'
 
 interface AgentCommandOptions {
   json?: boolean
   scope?: string
+  apply?: boolean
+  plan?: string
 }
 
-export async function agentsCommand(action: 'enable' | 'refresh' | 'list' | 'catalog', agents: string[] = [], options: AgentCommandOptions = {}): Promise<void> {
+function errorPayload(error: unknown): { error: string; report?: unknown; recovery?: unknown } {
+  const record = typeof error === 'object' && error !== null ? (error as Record<string, unknown>) : undefined
+  return {
+    error: error instanceof Error ? error.message : String(error),
+    ...(record?.report !== undefined ? { report: record.report } : {}),
+    ...(record?.recovery !== undefined ? { recovery: record.recovery } : {})
+  }
+}
+
+async function adoptAgents(agents: string[], options: AgentCommandOptions): Promise<void> {
+  if (options.apply && !options.plan) throw new Error("Applying adoption requires the reviewed plan ID: rerun with '--apply --plan <id>'.")
+  if (!options.apply && options.plan) throw new Error("'--plan' is only valid with '--apply'. Preview adoption without either flag first.")
+
+  if (options.apply) {
+    const result = await applyAgentAdoption({ targetPath: process.cwd(), agents, scope: options.scope, planId: options.plan! })
+    if (options.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n')
+    else {
+      process.stdout.write(`Adoption applied in ${result.scope} scope.\n`)
+      process.stdout.write(`Effective agents: ${result.configuredAgents.join(', ') || '(none recorded)'}\n`)
+      process.stdout.write(`${result.report.written.length} files written, ${result.report.unchanged.length} unchanged, ${result.report.conflicts.length} conflicts.\n`)
+      for (const warning of result.report.warnings) process.stderr.write(`Warning: ${warning}\n`)
+      for (const conflict of result.report.conflicts) process.stderr.write(`Conflict: ${conflict}\n`)
+    }
+    if (result.report.conflicts.length) process.exitCode = 1
+    return
+  }
+
+  const plan = await planAgentAdoption({ targetPath: process.cwd(), agents, scope: options.scope })
+  if (options.json) process.stdout.write(JSON.stringify(plan, null, 2) + '\n')
+  else {
+    process.stdout.write(`Adoption preview (${plan.scope} scope)\n`)
+    process.stdout.write(`Source: ${plan.source}\n`)
+    process.stdout.write('Inventory:\n')
+    for (const entry of plan.inventory) process.stdout.write(`  ${entry.kind}: ${entry.path}\n`)
+    process.stdout.write('Files:\n')
+    for (const file of plan.files) process.stdout.write(`  ${file.action}: ${file.path}\n`)
+    if (!plan.files.length) process.stdout.write('  (none)\n')
+    if (plan.prerequisites.length) {
+      process.stdout.write('Prerequisites:\n')
+      for (const prerequisite of plan.prerequisites) process.stdout.write(`  - ${prerequisite}\n`)
+    }
+    if (plan.warnings.length) {
+      process.stdout.write('Warnings:\n')
+      for (const warning of plan.warnings) process.stdout.write(`  - ${warning}\n`)
+    }
+    if (plan.conflicts.length) {
+      process.stdout.write('Conflicts:\n')
+      for (const conflict of plan.conflicts) process.stdout.write(`  - ${conflict}\n`)
+    }
+    if (plan.canApply) {
+      process.stdout.write(`Apply this exact plan: sf agents adopt ${plan.requestedAgents.join(' ')} --scope ${plan.scope} --apply --plan ${plan.planId}\n`)
+    } else process.stdout.write('This plan cannot be applied until its prerequisites and conflicts are resolved.\n')
+  }
+}
+
+export async function agentsCommand(action: 'enable' | 'refresh' | 'list' | 'catalog' | 'adopt', agents: string[] = [], options: AgentCommandOptions = {}): Promise<void> {
   try {
+    if (action === 'adopt') {
+      await adoptAgents(agents, options)
+      return
+    }
     if (action === 'catalog') {
       const profiles = listAgentProfiles()
       if (options.json) process.stdout.write(JSON.stringify({ registryVersion: AGENT_REGISTRY_VERSION, runtime: 'not-checked', profiles }, null, 2) + '\n')
@@ -41,14 +103,27 @@ export async function agentsCommand(action: 'enable' | 'refresh' | 'list' | 'cat
     }
     if (result.report.conflicts.length) process.exitCode = 1
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (options.json) process.stdout.write(JSON.stringify({ error: message }) + '\n')
-    else process.stderr.write(`Error: ${message}\n`)
+    const payload = errorPayload(error)
+    if (options.json) process.stdout.write(JSON.stringify(payload) + '\n')
+    else {
+      process.stderr.write(`Error: ${payload.error}\n`)
+      if (payload.report !== undefined) process.stderr.write(`Report: ${JSON.stringify(payload.report, null, 2)}\n`)
+      if (payload.recovery !== undefined) process.stderr.write(`Recovery: ${JSON.stringify(payload.recovery, null, 2)}\n`)
+    }
     process.exitCode = 1
   }
 }
 
 export function registerAgentCommands(command: Command): void {
+  command
+    .command('adopt')
+    .description('Preview or apply additive agent support to an existing repository')
+    .argument('<agents...>', getAgentIds().join(', '))
+    .option('--scope <scope>', 'Configuration scope: local (default) or shared', 'local')
+    .option('--apply', 'Apply a previously reviewed adoption plan')
+    .option('--plan <id>', 'Exact plan ID returned by the preview')
+    .option('--json', 'Output only the machine-readable plan or result')
+    .action((agents: string[], options: AgentCommandOptions) => agentsCommand('adopt', agents, options))
   command
     .command('catalog')
     .description('List registered tool profiles and declared support without probing runtimes')

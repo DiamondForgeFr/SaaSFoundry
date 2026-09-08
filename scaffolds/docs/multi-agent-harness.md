@@ -4,11 +4,15 @@ The shared-instructions foundation adds Codex and Kimi entry points alongside th
 
 ## Current scope
 
-This foundation exposes an installer API and additive `sf agents` commands for managed projects. Local scope is the default; shared scope is explicit. Unmanaged adoption is tracked by #649; capability diagnostics by #650; the full compatibility matrix by #651.
+This foundation exposes an installer API and additive `sf agents` commands for managed projects. Local scope is the default; shared scope is explicit. Existing repositories can start with
+`sf agents adopt <agents...>`, which previews a bounded adoption plan without writing and applies only with the exact returned plan ID. Capability diagnostics are tracked by #650 and the full
+compatibility matrix by #651.
 
 For a newly generated harness, `installHarness` accepts an optional `agents` array with `claude-code`, `codex`, and `kimi`. Omitting it preserves existing installation behavior. For an existing harness, `installAgentInstructions` adds the instruction surfaces without reinstalling its legacy files.
 
-The existing `CLAUDE.md` remains the source of project instructions during this additive phase. Generated `AGENTS.md` directs Codex and Kimi to read it. Portable skill copies live under `.agents/skills/`; the legacy `.claude/skills/` files remain available to Claude and existing scripts. Do not manually maintain divergent copies of generated procedures. Structural relocation belongs to the registered migration in the adoption phase.
+For managed Claude-first harnesses, the existing `CLAUDE.md` remains the source of project instructions. Generated `AGENTS.md` directs portable agents to read it. A Codex-only repository may instead
+retain its original `AGENTS.md` as the source and does not need `.claude/skills`; requesting Claude may add a small reference when the plan can do so without replacing custom instructions. Portable
+skill copies live under `.agents/skills/` when the source has managed skills to share. Do not manually maintain divergent copies of generated procedures.
 
 ## Conflicts and ownership
 
@@ -30,11 +34,26 @@ A developer can alternate agents on one completed piece of work without changing
 
 Runtime discovery must be verified in the actual agent. Filesystem and installer tests establish that the expected files exist; they do not establish that a particular desktop or CLI version loaded them.
 
+Runtime availability, hook execution, and manual skill readability are separate facts. Report them separately; none is evidence for the other two.
+
 ## Additive enablement on managed projects
 
 Use `sf agents enable codex --scope shared`, then `sf agents enable kimi claude-code --scope shared` to retain all three agents. `sf agents list --json` separates configured support from discovered files and does not claim runtime verification. `sf agents refresh --scope shared` refreshes the retained set after changes to common skills.
 
-For personal use, run `sf agents enable codex` (local by default) at the Git checkout root. Local setup preserves tracked files and the shared manifest, and isolates personal selections and exclusions by worktree. A tracked destination needing changes blocks local setup. Explicit shared setup makes its artifacts reviewable in Git and retains support for fresh clones. Unmanaged repository adoption belongs to #649. Unknown agent names and unsupported scopes are rejected before mutation. Existing user files and host settings are preserved; conflicts return a nonzero exit and reconciliation paths. The optional manifest inventory survives `sf update`, and repeated operations do not rewrite unchanged files.
+For personal use, run `sf agents enable codex` (local by default) at the Git checkout root. Local setup preserves tracked files and the shared manifest, and isolates personal selections and exclusions by worktree. A tracked destination needing changes blocks local setup. Explicit shared setup makes its artifacts reviewable in Git and retains support for fresh clones. Unknown agent names and unsupported scopes are rejected before mutation. Existing user files and host settings are preserved; conflicts return a nonzero exit and reconciliation paths. The optional manifest inventory survives `sf update`, and repeated operations do not rewrite unchanged files.
+
+For an existing repository, run `sf agents adopt codex --json` first. Planning performs inventory only: it creates no manifest, lock, Git config, exclusions, or generated files. The plan records the
+selected source and every proposed action. Application requires a valid manifest plus `--apply --plan <id>`; the implementation replans and rejects the ID when any relevant input is stale. Local
+adoption leaves tracked files untouched. Shared adoption produces a diff for review through the normal workflow. Custom mixed instruction roots are a conflict, never an invitation to pick a silent
+precedence.
+
+When no harness stamp exists, shared instruction adoption records harness version `0`; it does not claim the complete harness or `.claude/skills` were installed. `sf update` can distinguish that
+state from a full installation. An existing harness version is preserved.
+
+Adoption adds reference wrappers without copying skill/script contents, including recognized package paths that may contain customized credentials. The wrappers refer to existing custom and bundled procedures for explicit reading; later agent refreshes retain this reference-only policy.
+
+Adoption does not move source files and needs no numbered migration. It is additive and has no automatic removal path; removing an adapter is a separate deliberate operation that must account for
+user edits and repository history.
 
 ## Extensible tool profiles
 
