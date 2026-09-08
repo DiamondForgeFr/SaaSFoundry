@@ -8,8 +8,8 @@
 //   TEST_SCENARIO=all node --import tsx generate-and-build.ts
 //   node --import tsx generate-and-build.ts  # runs all scenarios
 
-import { execSync, spawn } from 'child_process'
-import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'fs'
+import { execFileSync, execSync, spawn, spawnSync } from 'child_process'
+import { existsSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 import {
@@ -592,6 +592,128 @@ async function runCliScenario(scenario: CliScenario): Promise<boolean> {
     results.push(assertFileContains(join(workspace, '.saasfoundry.json'), '"structure": "cli"'))
     results.push(assertDirExists(join(workspace, '.claude')))
     results.push(assertFileExists(join(workspace, 'CLAUDE.md')))
+
+    // Exercise multi-agent setup in this existing quick Linux scenario rather than adding
+    // another scaffold/build to the matrix. The generated harness has no workflow in
+    // non-interactive mode, so install the same bounded fixture used by ai-workflow-config
+    // before asking the real CLI to project it into the shared agent directory.
+    const { installWorkflowSkill } = await import(join(CLI_PATH, 'dist', 'installers', 'workflow-skill.installer'))
+    await installWorkflowSkill({
+      targetPath: workspace,
+      workflow: {
+        tool: 'github-projects',
+        projectUrl: 'https://github.com/test/test-project/projects/1',
+        workingBranch: 'develop',
+        prTargetBranch: 'develop',
+        statuses: [
+          { name: 'Backlog', color: 'GRAY' },
+          { name: 'Ready', color: 'YELLOW' },
+          { name: 'In Progress', color: 'BLUE' },
+          { name: 'Done', color: 'GREEN' }
+        ],
+        branchNaming: { feature: 'feature/{ticket}-{description}', fix: 'fix/{ticket}-{description}' },
+        template: 'saasfoundry-ai'
+      },
+      projectUrl: 'https://github.com/test/test-project/projects/1'
+    })
+
+    const agentHome = join(WORKSPACE, `.home-${scenario.name}`)
+    const agentTmp = join(WORKSPACE, `.tmp-${scenario.name}`)
+    mkdirSync(agentHome, { recursive: true })
+    mkdirSync(agentTmp, { recursive: true })
+    writeFileSync(join(agentHome, '.gitconfig'), '')
+    const agentEnv: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+      HOME: agentHome,
+      TMPDIR: agentTmp,
+      TEMP: agentTmp,
+      TMP: agentTmp,
+      LANG: process.env.LANG ?? 'C.UTF-8',
+      CI: 'true',
+      HUSKY: '0',
+      SF_SKILL_NO_WARN: '1',
+      GIT_CONFIG_GLOBAL: join(agentHome, '.gitconfig'),
+      GIT_CONFIG_NOSYSTEM: '1'
+    }
+    const agentsJson = (...args: string[]) =>
+      JSON.parse(
+        execFileSync(process.execPath, [bin, 'agents', ...args, '--json'], {
+          cwd: workspace,
+          encoding: 'utf8',
+          timeout: 30_000,
+          maxBuffer: 1024 * 1024,
+          env: agentEnv
+        })
+      ) as { configuredAgents: string[]; sharedAgents: string[]; localAgents: string[] }
+
+    const shared = agentsJson('enable', 'codex', 'gemini-cli', '--scope', 'shared')
+    results.push({
+      passed: ['claude-code', 'codex', 'gemini-cli'].every((agent) => shared.sharedAgents.includes(agent)),
+      message: `Shared agent coexistence: ${shared.sharedAgents.join(', ')}`
+    })
+
+    const sharedWorkflow = join(workspace, '.agents', 'skills', 'sf-workflow')
+    const sharedCli = join(sharedWorkflow, 'workflow-cli.sh')
+    const sharedSkill = join(sharedWorkflow, 'SKILL.md')
+    for (const path of [join(workspace, 'CLAUDE.md'), join(workspace, 'AGENTS.md'), join(workspace, 'GEMINI.md'), sharedCli, sharedSkill]) {
+      const regular = existsSync(path) && lstatSync(path).isFile()
+      results.push({ passed: regular, message: regular ? `OK: ${path} is a regular file` : `FAIL: ${path} is missing, linked, or not a regular file` })
+    }
+    const guardExecutable = existsSync(sharedCli) && (lstatSync(sharedCli).mode & 0o111) !== 0
+    results.push({ passed: guardExecutable, message: guardExecutable ? `OK: ${sharedCli} is executable` : `FAIL: ${sharedCli} is not executable` })
+    if (existsSync(sharedCli) && existsSync(sharedSkill)) {
+      const sharedSkillContent = readFileSync(sharedSkill, 'utf8')
+      results.push({
+        passed:
+          readFileSync(sharedCli).equals(readFileSync(join(workspace, '.claude', 'skills', 'sf-workflow', 'workflow-cli.sh'))) &&
+          /workflow/i.test(sharedSkillContent) &&
+          sharedSkillContent.includes('../../../.claude/docs/manifest-schema.md'),
+        message: 'Shared workflow CLI is copied exactly and SKILL.md has its shared-directory documentation links'
+      })
+    }
+
+    // These negative assertions only add signal on Docker's case-sensitive Linux
+    // filesystem. They catch adapters that happen to work on a default macOS checkout.
+    for (const wrongCase of ['agents.md', 'gemini.md', '.Agents', '.agents/Skills']) {
+      const absent = !existsSync(join(workspace, wrongCase))
+      results.push({ passed: absent, message: absent ? `OK: wrong-case path ${wrongCase} is absent` : `FAIL: wrong-case path ${wrongCase} exists` })
+    }
+
+    execFileSync('git', ['add', '-A'], { cwd: workspace, env: agentEnv, timeout: 30_000, maxBuffer: 1024 * 1024 })
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'shared agent support'], {
+      cwd: workspace,
+      env: agentEnv,
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024
+    })
+    const sharedManifest = readFileSync(join(workspace, '.saasfoundry.json'))
+    const local = agentsJson('enable', 'kimi', '--scope', 'local')
+    const inventory = agentsJson('list')
+    const cleanAfterLocal = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: workspace, encoding: 'utf8', env: agentEnv, timeout: 30_000, maxBuffer: 1024 * 1024 }) === ''
+    results.push({ passed: local.localAgents.includes('kimi'), message: `Local agents after enable: ${local.localAgents.join(', ') || '(none)'}` })
+    results.push({
+      passed: inventory.localAgents.includes('kimi') && ['claude-code', 'codex', 'gemini-cli'].every((agent) => inventory.sharedAgents.includes(agent)),
+      message: `Isolated inventory — shared: ${inventory.sharedAgents.join(', ')}; local: ${inventory.localAgents.join(', ') || '(none)'}`
+    })
+    results.push({
+      passed: readFileSync(join(workspace, '.saasfoundry.json')).equals(sharedManifest) && cleanAfterLocal,
+      message: cleanAfterLocal ? 'Local enable preserved the shared manifest and tracked tree' : 'FAIL: local enable changed the tracked tree'
+    })
+
+    const guardBefore = [readFileSync(sharedCli), readFileSync(sharedSkill), readFileSync(join(workspace, '.saasfoundry.json'))]
+    const guard = spawnSync(sharedCli, ['help'], { cwd: workspace, encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024, env: agentEnv })
+    const guardAfter = [readFileSync(sharedCli), readFileSync(sharedSkill), readFileSync(join(workspace, '.saasfoundry.json'))]
+    const guardReadOnly =
+      guardBefore.every((content, index) => content.equals(guardAfter[index])) &&
+      execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: workspace, encoding: 'utf8', env: agentEnv, timeout: 30_000, maxBuffer: 1024 * 1024 }) === ''
+    const guardPassed = guard.status === 0 && /workflow/i.test(guard.stdout) && guardReadOnly
+    const guardFailure = guard.error ? 'spawn-error' : guard.status === null ? 'terminated' : guard.status !== 0 ? 'nonzero-exit' : !guardReadOnly ? 'fixture-changed' : 'unexpected-output'
+    results.push({
+      passed: guardPassed,
+      message: guardPassed
+        ? 'Shared guarded workflow CLI help executed read-only'
+        : `FAIL: shared guarded workflow CLI help category=${guardFailure} exit=${String(guard.status)} signal=${guard.signal ?? 'none'}`
+    })
   } else {
     // The placement criterion #537 could not lean on any test for.
     results.push(assertDirExists(projectDir))

@@ -106,6 +106,8 @@ read from the manifest; checkout-private registration remains `not-checked` and 
 Exit code `1` reports a failed check or invalid request; `0` means the report was produced without a failed check. Missing artifacts and unverified host capabilities can still appear in a report that
 exits `0`: read each check before working. File presence, vendor-documented support, executable availability and actual host behavior are distinct facts.
 
+For a reproducible native-observation protocol and safe Claude/Codex handoffs, see [Agent coexistence and native verification](../guide/agent-coexistence.md).
+
 ### Initialize a session when hooks are missing or unverified
 
 1. Load the chosen entrypoint (`CLAUDE.md`, `AGENTS.md` or `GEMINI.md`) and every project instruction it references. Read `.saasfoundry.json` for the workflow, SRS backend and output language.
