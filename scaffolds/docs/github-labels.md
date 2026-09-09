@@ -55,18 +55,18 @@ gh label create srs:new      --repo DiamondForgeFr/SaasFoundryAI --color 3B82F6 
 
 The Nature axis controls whether a ticket must visit **Human Testing** or can skip straight to **In Review** after AI Testing. See `.claude/skills/sf-workflow/SKILL.md` "Nature axis" section.
 
-| Label                | Color     | Purpose                                                                                 | Workflow effect                                               |
-| -------------------- | --------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `nature:user-facing` | `#0E8A16` | Bug fix or feature with visible UX impact (default behaviour when no `nature:*` label). | Mandatory `AI Testing → Human Testing → In Review → Done`     |
-| `nature:internal`    | `#C5DEF5` | Refactor, scaffolding, internal tooling, doc-only change — ships its own PR.            | Optional `AI Testing → In Review → Done` (skip Human Testing) |
-| `nature:bundled-pr`  | `#FBCA04` | Sub of a multi-step Epic whose merge happens via the parent Epic's single bundled PR.   | `AI Testing → Done` (skip Human Testing **and** In Review)    |
+| Label                | Color     | Purpose                                                                                                      | Workflow effect                                               |
+| -------------------- | --------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `nature:user-facing` | `#0E8A16` | Bug fix or feature with visible UX impact (default behaviour when no `nature:*` label).                      | Mandatory `AI Testing → Human Testing → In Review → Done`     |
+| `nature:internal`    | `#C5DEF5` | Refactor, scaffolding, internal tooling, doc-only change — ships its own PR.                                 | Optional `AI Testing → In Review → Done` (skip Human Testing) |
+| `nature:bundled-pr`  | `#FBCA04` | Child ticket under a delivery parent; one atomic commit lands on the parent's branch, with no individual PR. | `AI Testing → Done` (skip Human Testing **and** In Review)    |
 
 Create them once with:
 
 ```bash
 gh label create "nature:user-facing" --repo DiamondForgeFr/SaasFoundryAI --color "0E8A16" --description "Workflow: ticket has user-visible impact, requires Human Testing" || true
 gh label create "nature:internal"    --repo DiamondForgeFr/SaasFoundryAI --color "C5DEF5" --description "Workflow: refactor/scaffolding/non-terminal story, Human Testing optional" || true
-gh label create "nature:bundled-pr"  --repo DiamondForgeFr/SaasFoundryAI --color "FBCA04" --description "Workflow: Sub merged via parent Epic's bundled PR, skips In Review" || true
+gh label create "nature:bundled-pr"  --repo DiamondForgeFr/SaasFoundryAI --color "FBCA04" --description "Workflow: bundled child commit on delivery parent branch, skips In Review" || true
 ```
 
 The `workflow-cli.sh update-status` guard enforces the rule — see "Nature guard" in `.claude/skills/sf-workflow/workflow-cli.sh`.

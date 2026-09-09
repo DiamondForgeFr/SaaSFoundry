@@ -33,9 +33,7 @@ In Review directly. See SKILL.md "Nature axis" section.
 
 ## Ticket type
 
-- **Epic** — no manual test, no PR. Status is **derived** from children (only enters Human Testing when the last child does). Skip this checklist. **Special case** — when the Epic groups exclusively
-  `nature:internal` children, the meaningful manual validation happens at Epic completion (e.g. integration test on freshly merged `develop`); tag the Epic itself `nature:user-facing` so it visits
-  this status.
+- **Epic** — never enters Human Testing. It has no manual test or PR and stays `In progress` until every delivery-parent child is `Done`.
 - **Story / Task / Issue** — full flow below.
 
 ## Action checklist

@@ -9,11 +9,14 @@ gate the transition. The AI agent reads the status description file (`.claude/sk
 | --- | ----------------- | -------------------------------------------------------- |
 | 1   | **Backlog**       | Preparation — detect complexity, analyse, plan, validate |
 | 2   | **Ready**         | Queue of validated tickets awaiting pickup               |
-| 3   | **In progress**   | Active development with subtask creation + commits       |
+| 3   | **In progress**   | Active development with child-ticket delivery + commits  |
 | 4   | **AI testing**    | Automated validation + test plan execution               |
 | 5   | **Human testing** | Manual validation by the human developer                 |
 | 6   | **In review**     | PR creation + green CI + reviewer approval               |
 | 7   | **Done**          | Merge finalisation + branch cleanup                      |
+
+An `sf-epic` is an aggregate rather than a delivery ticket. It has no branch or PR and stays `In progress` while its children move through testing and review. The first child entering `In progress`
+moves the Epic through `Ready` to `In progress`; the last child reaching `Done` moves it to `Done`. Epics may span multiple milestones because milestone scope belongs to their delivery children.
 
 ## 1. Backlog
 
@@ -60,25 +63,24 @@ gate the transition. The AI agent reads the status description file (`.claude/sk
 1. **Read config from `.saasfoundry.json`** — working branch and branch naming pattern.
 2. **Create the feature branch** — checkout working branch, pull rebase, create `feature/{N}-{description}`.
 3. Move the ticket's board status to "In progress".
-4. **Create subtasks** — break the work into atomic subtasks via `github-projects-cli.sh create-subtask <parent> "<title>"`. Subtasks must be **real GitHub issues** linked via the GraphQL sub-issue
-   relationship, never markdown checkboxes.
-5. Implement iteratively, committing after each subtask lands.
-6. **Close each subtask immediately when its commit is pushed** — never batch closures at the end. Verify with `gh issue view <sub> --json state`.
+4. **Create child tickets** — break the work into atomic child tickets via `github-projects-cli.sh create-subtask <parent> "<title>"`. Children must be **native GitHub sub-issues** linked via the
+   GraphQL sub-issue relationship, never markdown checkboxes.
+5. Implement iteratively. A normal child owns its branch and PR; a `nature:bundled-pr` child is one atomic commit on the parent's branch.
+6. **Close each child immediately after its delivery is verified** — normal child after PR merge, bundled child after its commit is validated. Verify with `gh issue view <child> --json state`.
 7. Push commits to remote **before** requesting the transition to AI testing.
 
 **Exit conditions:**
 
-- All subtasks closed on GitHub (zero open children)
+- Parent implementation is pushed; child tickets continue through their own lifecycle as needed
 - All commits pushed to remote
 - Code is ready to be tested
 
 ## 4. AI testing
 
-**Entry:** all subtasks complete and closed, code pushed.
+**Entry:** code pushed and ready for testing.
 
 **Mandatory actions:**
 
-0. **Gate check — zero open children**: `gh issue list --state open --search "parent #{N}"` must return `[]`. If not, go back to In progress.
 1. **Generate the test plan** — post as a ticket comment. Setup / scenarios / expected results / non-regression checks.
 2. Move the board status to "AI testing".
 3. **Run automated tests** — build, lint, type-check, unit tests.
@@ -146,7 +148,7 @@ gate the transition. The AI agent reads the status description file (`.claude/sk
 The status progression is **not a suggestion**. Each gate protects a real invariant:
 
 - Backlog → Ready gates on specs being ready, so the agent doesn't start coding against ambiguous requirements.
-- In progress → AI testing gates on subtask closure, so the board never shows an inconsistent state where code is merged but subtasks are still "open".
+- Done gates on child completion, so the board never shows a parent marked Done while child tickets are still open or unfinished.
 - AI testing → Human testing gates on automated checks, so the human doesn't waste time hunting for bugs the machine could have caught.
 - Human testing → In review gates on non-regression tests, so a merged feature can't regress silently later.
 - In review → Done gates on green CI + reviewer approval, so nothing ships without a second pair of eyes.

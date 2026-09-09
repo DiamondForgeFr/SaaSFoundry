@@ -1,6 +1,6 @@
 ---
 status: In Progress
-banner_ai: Branch from workingBranch, one commit per subtask, validate (build/lint/tests), push
+banner_ai: Branch from workingBranch, deliver child tickets, validate (build/lint/tests), push
 banner_human: Nothing yet — next involvement at Human Testing (or PR review for nature:internal)
 complexity_profiles: [bug, low, medium, complex]
 entry_conditions:
@@ -10,11 +10,10 @@ mandatory_actions:
   - Create feature branch from `workingBranch` (manifest)
   - Move ticket to `In Progress`
   - Create subtasks as real GitHub issues (NOT checkboxes)
-  - Develop iteratively — one commit per subtask, close each subtask right after its commit lands
+  - Deliver each child ticket in its declared mode; close it immediately when its PR is merged or its bundled commit is validated
   - Final validation — build, lint, unit tests green
   - Push branch
 exit_conditions:
-  - All subtasks closed on GitHub (`gh issue list --state open --search "parent #<N>"` returns [])
   - Code compiles without errors
   - Lint passes
   - Existing tests pass
@@ -28,10 +27,10 @@ Active development — subtask creation, iterative commits, final validation.
 
 ## Ticket type
 
-- **Epic** (`type: epic`): no branch, no commit, no PR. Skip "Branch + develop" + "Final validation" below. Only create children via `create-subtask` and coordinate. Epic status is **derived** — moves
-  to `In progress` automatically when the first child does.
+- **Epic** (`sf-epic` issue type): optional grouping ticket; no branch, commit, or PR. Only create and coordinate delivery-parent children. Epic status is **derived** from those children.
 - **Story / Task / Issue**: full flow below.
-- **Subtask**: a commit on the current branch, not a GitHub issue. Do not use `create-subtask`.
+- **Child ticket**: always a native GitHub sub-issue created with `create-subtask`. A normal child owns its branch and PR; a `nature:bundled-pr` child contributes one atomic commit on this parent's
+  branch and has no own PR.
 
 ## SRS drafting tickets (`srs:drafting | srs:update | srs:new`)
 
@@ -43,9 +42,9 @@ These stay in the `In progress` board column but flow through a **separate lifec
 - [ ] **Branch** — from `jq -r '.workflow.workingBranch' .saasfoundry.json`, pattern `jq -r '.workflow.branchNaming.feature'`
   - `git checkout <workingBranch> && git pull --rebase && git checkout -b feature/<N>-<description>`
 - [ ] **Move ticket to "In Progress"** via `workflow-cli.sh update-status <ticket> "In progress"`
-- [ ] **Create subtasks** — `workflow-cli.sh create-subtask <parent> "<title>" ["<body>"]` (auto-links as sub-issue)
-- [ ] **Per subtask:** move to In Progress → code → commit (`<type>(#<N>): <description>`) → `update-status <sub> Done` → `gh issue view <sub> --json state` must print `CLOSED` (never batch closures)
-- [ ] **All subtasks done:** verify zero open children (`gh issue list --state open --search "parent #<N>"` → `[]`) → `npm run build && npm run lint` → `npm test` → push
+- [ ] **Create child tickets** — `workflow-cli.sh create-subtask <parent> "<title>" ["<body>"]` (auto-links as a native sub-issue); mark bundled children with `nature:bundled-pr`
+- [ ] **Per normal child:** branch → code → PR → verify merge → `update-status <child> Done`; per bundled child: one atomic commit on the parent's branch → validate → `update-status <child> Done`
+- [ ] **Before leaving In Progress:** finish the parent's implementation and validation → `npm run build && npm run lint` → `npm test` → push. Child tickets may continue through their own lifecycle.
 
 ## Errors to avoid
 
@@ -53,5 +52,5 @@ These stay in the `In progress` board column but flow through a **separate lifec
 - Mixing multiple tickets in the same branch
 - Moving to AI Testing with lint/build errors
 - Forgetting to push before AI Testing
-- Batching subtask closures at the end — close each one right after its commit lands
+- Leaving delivered child tickets open, or marking the parent Done before every child is Done
 - Starting another ticket while this one is still In Progress / AI Testing / Human Testing / In Review (unless the developer explicitly asks to pause)

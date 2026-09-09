@@ -108,7 +108,7 @@ $CLI create-subtask 42 "Backend API"
 $CLI create-subtask 42 "Frontend UI"
 $CLI create-subtask 42 "Unit tests"
 
-# 5. Implement + commit + push subtasks, closing each one as its commit lands
+# 5. Deliver child tickets: normal children use their own branch/PR; bundled children are one atomic parent-branch commit
 git commit -m "feat(#SUB-1): backend API" && git push
 $CLI update-status <SUB-1> "Done"    # close immediately
 
@@ -120,54 +120,51 @@ $CLI update-status <SUB-3> "Done"
 
 # --- AI testing phase ---
 
-# 6. Verify zero open children (gate check)
-gh issue list --state open --search "parent #42"    # must return []
-
-# 7. Move to AI testing, generate test plan, run automated checks
+# 6. Move to AI testing, generate test plan, run automated checks
 $CLI update-status 42 "AI testing"
 npm run build && npm run lint && npm run type-check && npm run test:unit
 
 # --- Human testing phase ---
 
-# 8. Move to Human testing, wait for developer validation
+# 7. Move to Human testing, wait for developer validation
 $CLI update-status 42 "Human testing"
 
-# 9. Developer validates → add non-regression tests
+# 8. Developer validates → add non-regression tests
 git commit -m "test(#42): add E2E regression tests" && git push
 
 # --- In review phase ---
 
-# 10. Open the PR and move to In review
+# 9. Open the PR and move to In review
 $CLI create-pr 42
 $CLI update-status 42 "In review"
 
-# 11. Wait for green CI and reviewer approval, then merge via GitHub UI
+# 10. Wait for green CI and reviewer approval, then merge via GitHub UI
 
 # --- Done phase ---
 
-# 12. Move to Done, clean up local branch
+# 11. Verify every child project-board Status is Done, then move parent to Done and clean up
+$CLI list-incomplete-children 42    # must return []
 $CLI update-status 42 "Done"
 git checkout develop && git pull --rebase
 git branch -d feature/42-add-billing
 ```
 
-## Sub-issue relationships (GraphQL)
+## Native sub-issue relationships
 
 The `create-subtask` command performs two operations atomically:
 
-1. `gh issue create` — creates the sub-issue with title `[Parent #{N}] <title>` and prepends a "Parent: #{N}" reference to the body.
-2. `gh api graphql -f query='mutation { addSubIssue(input: {issueId: $parent, subIssueId: $sub}) { ... } }'` — establishes the GraphQL sub-issue relationship, which is what powers the `parent #{N}`
-   search operator.
+1. `gh issue create` — creates the sub-issue with the requested title and body.
+2. `gh api graphql -f query='mutation { addSubIssue(input: {issueId: $parent, subIssueId: $sub}) { ... } }'` — establishes the native sub-issue relationship.
 
-This is why `gh issue list --state open --search "parent #42"` works reliably: the relationship is indexed by GitHub's search service via the GraphQL mutation, not by scraping body text.
+`list-incomplete-children` reads that native relationship through GitHub's paginated sub-issues REST endpoint, then resolves each child's Status on the configured project board. It does not depend on
+a title prefix, body text, or the issue's open/closed state.
 
-Without `addSubIssue`, the zero-open-children gate (AI Rules, rule 7) would fail silently — the search would return `[]` even when subtasks were open.
+Without `addSubIssue`, the child is not part of the parent's native hierarchy and cannot participate in the parent Done gate or Epic status roll-up.
 
 ## Where to look when things go wrong
 
 - **Status transitions fail** → check that the board's "Status" field has all 7 options spelled exactly as the workflow expects (case-insensitive, but every option must exist).
-- **`parent #{N}` search returns `[]` but you know there are open children** → the GraphQL `addSubIssue` call likely failed. Re-create the sub-issue via `create-subtask` instead of raw
-  `gh issue create`.
+- **`list-incomplete-children <N>` omits a known child** → the GraphQL `addSubIssue` call likely failed. Re-create the sub-issue via `create-subtask` instead of raw `gh issue create`.
 - **Complexity label not changing** → `set-complexity` removes existing complexity labels before adding the new one. If you applied labels manually, there may be a stale complexity label it didn't
   know about. `get-complexity` reports what it sees.
 - **PR creation fails** → verify `.saasfoundry.json` has `workflow.prTargetBranch` set and the branch is pushed. `create-pr` does not push for you — push first.

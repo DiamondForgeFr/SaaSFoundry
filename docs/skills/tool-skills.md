@@ -212,8 +212,8 @@ today do not change when they land.
 These skills are **not opt-in** in the same way as `sf-tool-context7` — they are the plumbing `sf-workflow` relies on to move tickets across statuses, create sub-issues, post test-plan comments, and
 open PRs from the CLI. You do not call them directly; `sf-workflow` calls them for you.
 
-The `sf-tool-github-projects` CLI is worth reading even if you never invoke it yourself — it documents the GraphQL shape SaaSFoundryAI uses for sub-issue linking, which is the pattern `sf-workflow`
-enforces for the "zero open children before moving the parent" rule.
+The `sf-tool-github-projects` CLI is worth reading even if you never invoke it yourself — it links native sub-issues, reports every child whose project-board Status is not `Done`, and gives
+`sf-workflow` the data used for parent completion guards and Epic status roll-up.
 
 See [GitHub Integration](/workflow/github-integration) for how the skill talks to Projects V2.
 

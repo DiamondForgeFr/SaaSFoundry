@@ -67,6 +67,9 @@ describe('shared agent instructions', () => {
     expect(await get('CLAUDE.md')).toBe(before)
     expect(await get('.claude/skills/sf-git-commit/SKILL.md')).toBe(SKILL)
     expect(await get('AGENTS.md')).toContain('Read `CLAUDE.md`')
+    expect(await get('AGENTS.md')).toContain('`nature:bundled-pr` child')
+    expect(await get('AGENTS.md')).toContain('An Epic has no PR')
+    expect(await get('AGENTS.md')).toContain('every native child has board status Done')
     expect(result.warnings.some((w) => w.includes("'model'"))).toBe(true)
   })
 

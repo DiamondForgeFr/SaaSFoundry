@@ -96,7 +96,7 @@ Every commit message goes through `@commitlint/cli` with the rules in `commitlin
 ```
 
 - **`<type>`** — one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, `ci`, `build`, `revert`
-- **`(#<ticket>)`** — required scope. Every change is tied to a GitHub issue (the workflow CLI enforces this end-to-end). Use the parent Sub or Story number.
+- **`(#<ticket>)`** — required scope. Every change is tied to a GitHub issue (the workflow CLI enforces this end-to-end). Use the delivery parent or child ticket number as appropriate.
 - **Header length** — capped at 100 characters. Keep the description short; put detail in the body.
 
 Examples:
@@ -154,8 +154,9 @@ Backlog → Ready → In progress → AI testing → Human testing → In review
 - Read `.claude/skills/sf-workflow/statuses/<N>-<name>.md` before any transition — the file lists the mandatory entry actions and exit conditions.
 - Use the workflow CLI: `.claude/skills/sf-workflow/workflow-cli.sh update-status <ticket> <status> --reason "..."`. Don't drag cards in the GitHub Projects UI manually — the CLI runs the guards (PR
   existence, complexity label, parent-status mirror, …) the UI doesn't know about.
-- Subtasks are real GitHub issues, not checkboxes. Create them via `.claude/skills/sf-tool-github-projects/github-projects-cli.sh create-subtask`.
-- Bundled PRs (one PR closing several tightly-coupled subs) are explicitly supported via `nature:bundled-pr` — see `.claude/skills/sf-workflow/SKILL.md` "Nature axis".
+- Child tickets are native GitHub sub-issues, not checkboxes. Create them via `.claude/skills/sf-tool-github-projects/github-projects-cli.sh create-subtask`.
+- Normal children own a branch and PR. A bundled child is one atomic commit on its delivery parent's branch, carries `nature:bundled-pr`, and may go AI Testing → Done after validation — see
+  `.claude/skills/sf-workflow/SKILL.md` "Nature axis".
 
 Full guidance: [Workflow skill SKILL.md](https://github.com/DiamondForgeFr/SaasFoundryAI/blob/develop/.claude/skills/sf-workflow/SKILL.md).
 

@@ -19,7 +19,7 @@ const BASH = '/bin/bash'
 
 async function buildSandbox(
   prListPayload: string,
-  options: { ghExitCode?: number } = {}
+  options: { ghExitCode?: number; mergedPrListPayload?: string } = {}
 ): Promise<{
   dir: string
   env: NodeJS.ProcessEnv
@@ -54,6 +54,12 @@ case "$1" in
   get-labels)
     printf '%s\\n' "complexity: low"
     ;;
+  list-incomplete-children)
+    printf '%s' '[]'
+    ;;
+  get-issue-type)
+    printf '%s' '{"name":"sf-story"}'
+    ;;
   update-status)
     echo "✓ Ticket #$2 → $3"
     ;;
@@ -72,6 +78,7 @@ esac
   // by the test (or simulate a fetch failure when ghExitCode > 0).
   const exitCode = options.ghExitCode ?? 0
   const escaped = prListPayload.replace(/'/g, "'\\''")
+  const mergedEscaped = (options.mergedPrListPayload ?? '[]').replace(/'/g, "'\\''")
   const ghShim = `#!/bin/bash
 printf '%s\\n' "$*" >> '${ghLogPath}'
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
@@ -79,7 +86,11 @@ if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
     echo "gh: simulated failure" >&2
     exit ${exitCode}
   fi
-  printf '%s' '${escaped}'
+  if [ "$4" = "merged" ]; then
+    printf '%s' '${mergedEscaped}'
+  else
+    printf '%s' '${escaped}'
+  fi
   exit 0
 fi
 exit 0
@@ -142,16 +153,17 @@ describe('sf-workflow CLI — PR-merged guard', () => {
     expect(res.stderr).toContain('open PR (#410)')
   })
 
-  it('allows "Done" when there is no open PR for the ticket (Epic / doc-only / merged case)', async () => {
+  it('blocks "Done" when the ticket has no open or verified merged PR', async () => {
     sandbox = await buildSandbox('[{"number":999,"headRefName":"feature/77-other-ticket"}]')
     const res = await runCli(['update-status', '42', 'Done'], sandbox)
-    expect(res.code).toBe(0)
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain('no verified merged PR')
     const toolCalls = readLog(sandbox.toolLogPath).filter((l) => l.startsWith('update-status'))
-    expect(toolCalls).toHaveLength(1)
+    expect(toolCalls).toEqual([])
   })
 
-  it('allows "Done" when the open-PR list is empty (PR already merged)', async () => {
-    sandbox = await buildSandbox('[]')
+  it('allows "Done" only for a matching PR verified merged into develop', async () => {
+    sandbox = await buildSandbox('[]', { mergedPrListPayload: '[{"number":333,"headRefName":"feature/42-do-the-thing","baseRefName":"develop","mergedAt":"2026-09-09T10:00:00Z"}]' })
     const res = await runCli(['update-status', '42', 'Done'], sandbox)
     expect(res.code).toBe(0)
     const toolCalls = readLog(sandbox.toolLogPath).filter((l) => l.startsWith('update-status'))
@@ -181,18 +193,20 @@ describe('sf-workflow CLI — PR-merged guard', () => {
     expect(toolCalls).toHaveLength(1)
   })
 
-  it('fails open when gh errors (offline / auth issue) — better to allow than to wedge the workflow', async () => {
+  it('fails closed when PR verification errors', async () => {
     sandbox = await buildSandbox('', { ghExitCode: 1 })
     const res = await runCli(['update-status', '42', 'Done'], sandbox)
-    expect(res.code).toBe(0)
+    expect(res.code).toBe(2)
     const toolCalls = readLog(sandbox.toolLogPath).filter((l) => l.startsWith('update-status'))
-    expect(toolCalls).toHaveLength(1)
+    expect(toolCalls).toEqual([])
   })
 
   it('does not match a different ticket number that happens to be a prefix (ticket 4 vs 42)', async () => {
     // headRefName "feature/420-foo" must NOT count as the open PR for ticket 42:
     // the regex anchors on `^(feature|fix)/<N>(-|$)` so 42 only matches `feature/42-…` or `feature/42`.
-    sandbox = await buildSandbox('[{"number":888,"headRefName":"feature/420-other"}]')
+    sandbox = await buildSandbox('[{"number":888,"headRefName":"feature/420-other"}]', {
+      mergedPrListPayload: '[{"number":333,"headRefName":"feature/42-done","baseRefName":"develop","mergedAt":"2026-09-09T10:00:00Z"}]'
+    })
     const res = await runCli(['update-status', '42', 'Done'], sandbox)
     expect(res.code).toBe(0)
     const toolCalls = readLog(sandbox.toolLogPath).filter((l) => l.startsWith('update-status'))
