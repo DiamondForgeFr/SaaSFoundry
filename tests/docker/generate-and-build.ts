@@ -36,6 +36,7 @@ import {
   reportResults,
   scanForUnreplacedPlaceholders
 } from './assertions'
+import { auditCriticalWorkspaces } from './npm-audit'
 import { ALL_SCENARIOS, getScenario, getTopScenarios, GenerationScenario, UpdateScenario, AIScenario, MigrationScenario, TestScenario, CliScenario, BootScenario } from './scenarios'
 
 // ── Config ─────────────────────────────────────────────────────
@@ -326,6 +327,11 @@ async function runGenerationScenario(scenario: GenerationScenario): Promise<bool
 
   if (scenario.validateApiContract === true) {
     results.push(...(await validateGeneratedApiContract(projectDir, scenario.projectName)))
+  }
+
+  if (scenario.auditDependencies === true) {
+    console.log('  > npm audit (critical) across generated workspaces')
+    results.push(...auditCriticalWorkspaces(projectDir))
   }
 
   const storageInstalled = scenario.s3Setup !== 'manual'
@@ -942,26 +948,6 @@ async function waitForHttp(url: string, timeoutSeconds: number, logPath: string)
 }
 
 /**
- * `npm audit`, told apart from `npm audit could not run`.
- *
- * Both exit non-zero. Reporting a proxy failure as a critical advisory would be the same
- * class of confidently wrong answer this scenario exists to remove.
- */
-function auditCritical(cwd: string, label: string): AssertionResult {
-  try {
-    execSync('npm audit --audit-level=critical', { cwd, stdio: 'pipe', timeout: 120_000 })
-    return { passed: true, message: `OK: ${label} has no critical advisories` }
-  } catch (err) {
-    const error = err as { stdout?: Buffer; stderr?: Buffer }
-    const output = `${error.stdout?.toString() || ''}${error.stderr?.toString() || ''}`
-    if (/ENOTFOUND|ETIMEDOUT|ECONNREFUSED|network|registry/i.test(output) && !/critical/i.test(output)) {
-      throw new Error(`npm audit could not reach the registry for ${label}: ${output.slice(-500)}`)
-    }
-    return { passed: false, message: `FAIL: ${label} has critical advisories\n${output.slice(-1500)}` }
-  }
-}
-
-/**
  * The scenario that starts the project.
  *
  * `--db-setup credentials` against the local cluster is not a shortcut around the docker
@@ -1033,8 +1019,7 @@ async function runBootScenario(scenario: BootScenario): Promise<boolean> {
     results.push({ passed: true, message: `OK: the web app answered / on ${ports.web}` })
 
     await runStep('npm audit (critical)', () => {
-      results.push(auditCritical(apiDir, 'api'))
-      results.push(auditCritical(webDir, 'web'))
+      results.push(...auditCriticalWorkspaces(projectDir))
     })
 
     await runStep('api npm run test:unit', () => {
