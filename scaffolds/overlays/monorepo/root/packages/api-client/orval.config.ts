@@ -23,16 +23,20 @@ export default defineConfig({
       target: './src/generated/api',
       schemas: './src/generated/api/model',
       client: 'react-query',
+      // Orval 8 defaults to fetch. Keep the axios-shaped request object because
+      // apiClientMutator owns the actual Fetch transport and consumes this shape.
+      httpClient: 'axios',
       clean: true,
       prettier: true,
       override: {
+        // Preserve the named oneOf/anyOf/allOf aliases emitted by Orval 7 so
+        // upgrading the generator does not remove public model exports.
+        aliasCombinedTypes: true,
         mutator: {
           path: './src/http-client.ts',
           name: 'apiClientMutator'
         },
         query: {
-          useQuery: true,
-          useMutation: true,
           signal: true
         }
       }
