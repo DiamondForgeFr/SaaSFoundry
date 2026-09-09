@@ -6,6 +6,7 @@ export class GuestResponseDto implements GuestResponse {
   @ApiProperty({
     description: 'User roles',
     example: ['GUEST'],
+    type: String,
     isArray: true
   })
   roles: string[]
@@ -13,6 +14,7 @@ export class GuestResponseDto implements GuestResponse {
   @ApiProperty({
     description: 'Accessible modules for the guest user',
     example: ['USER_ACCOUNT_CREATION', 'USER_ACCOUNT_LOGIN'],
+    type: String,
     isArray: true
   })
   modules: string[]
@@ -20,6 +22,7 @@ export class GuestResponseDto implements GuestResponse {
   @ApiProperty({
     description: 'Guest user permissions',
     example: ['USER_ACCOUNT_CREATE_OWN', 'USER_ACCOUNT_LOGIN'],
+    type: String,
     isArray: true
   })
   permissions: string[]
