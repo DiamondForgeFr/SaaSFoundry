@@ -60,7 +60,8 @@ RUN mkdir -p "$PGDATA" /run/postgresql \
   && chown -R postgres:postgres "$PGDATA" /run/postgresql \
   && su postgres -c "initdb -D $PGDATA --auth=trust --username=postgres"
 
-# Install tsx for running TypeScript directly
-RUN npm install --no-save tsx
+# Install the Docker harness runtime and its OpenAPI validator. Keep the validator
+# test-only: generated projects should not need it at runtime.
+RUN npm install --no-save tsx@4.21.0 @apidevtools/swagger-parser@13.0.0
 
 ENTRYPOINT ["node", "--import", "tsx", "/workspace/generate-and-build.ts"]
