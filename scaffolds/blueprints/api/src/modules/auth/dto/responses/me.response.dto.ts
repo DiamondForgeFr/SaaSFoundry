@@ -176,13 +176,13 @@ export class RoleAssignmentDto implements RoleAssignment {
   @ApiProperty({ description: 'Entity ID this assignment targets (only when scope = ENTITY)', nullable: true })
   entityId: string | null
 
-  @ApiProperty({ description: 'Modules accessible through this assignment', isArray: true })
+  @ApiProperty({ description: 'Modules accessible through this assignment', type: String, isArray: true })
   modules: string[]
 
-  @ApiProperty({ description: 'Sub-modules (visible sections) granted by this assignment', isArray: true })
+  @ApiProperty({ description: 'Sub-modules (visible sections) granted by this assignment', type: String, isArray: true })
   subModules: string[]
 
-  @ApiProperty({ description: 'Permissions granted by this assignment', isArray: true })
+  @ApiProperty({ description: 'Permissions granted by this assignment', type: String, isArray: true })
   permissions: string[]
 }
 
@@ -222,6 +222,7 @@ export class MeResponseDto implements MeResponse {
   @ApiProperty({
     description: 'Legacy flat union of role names',
     example: ['USER', 'ADMIN', 'TESTER'],
+    type: String,
     isArray: true
   })
   roles: string[]
@@ -229,6 +230,7 @@ export class MeResponseDto implements MeResponse {
   @ApiProperty({
     description: 'Legacy flat union of module names',
     example: ['USER_ACCOUNT_PASSWORD_RECOVERY', 'USER_ACCOUNT_CREATION'],
+    type: String,
     isArray: true
   })
   modules: string[]
@@ -236,6 +238,7 @@ export class MeResponseDto implements MeResponse {
   @ApiProperty({
     description: 'Legacy flat union of sub-module names',
     example: ['OVERVIEW', 'USERS', 'ROLES'],
+    type: String,
     isArray: true
   })
   subModules: string[]
@@ -243,6 +246,7 @@ export class MeResponseDto implements MeResponse {
   @ApiProperty({
     description: 'Legacy flat union of permission names',
     example: ['USER_ACCOUNT_CREATE_OWN', 'PASSWORD_RECOVERY_LINK_REQUEST_OWN', 'PASSWORD_RECOVERY_RESET_OWN'],
+    type: String,
     isArray: true
   })
   permissions: string[]
