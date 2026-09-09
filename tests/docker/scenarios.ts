@@ -18,6 +18,8 @@ export interface GenerationScenario {
   includePwa?: boolean
   /** Exercise the emitted OpenAPI -> generated client contract after the normal build. */
   validateApiContract?: boolean
+  /** Reject critical advisories across every generated npm workspace. */
+  auditDependencies?: boolean
 }
 
 export interface UpdateScenario {
@@ -97,11 +99,9 @@ export interface CliScenario {
  * One scenario, not all of them. The build matrix is good at topology and modules; adding
  * a boot to each would multiply a seventy-minute suite for no extra signal.
  *
- * Multirepo on purpose. The failure this exists to catch lives in the API's DTOs and is
- * topology-independent, so the cheaper topology proves the same thing — and a fresh
- * monorepo currently ships 11 critical advisories (#586) while a fresh multirepo ships
- * none, so gating on `npm audit` here does not mean landing a scenario that is red on
- * arrival. That audit belongs to #586; this scenario does not borrow against it.
+ * Multirepo remains useful here because it boots both independently installed apps. The
+ * generation matrix separately audits a monorepo, where shared packages can carry
+ * advisories that do not exist in this topology.
  */
 export interface BootScenario {
   type: 'boot'
@@ -146,7 +146,8 @@ export const ALL_SCENARIOS: TestScenario[] = [
     s3Setup: 'manual',
     emailService: 'none',
     includeAnalytics: false,
-    validateApiContract: true
+    validateApiContract: true,
+    auditDependencies: true
   },
 
   // ── Priority 3-4: Full builds (all modules) ──────────────────
