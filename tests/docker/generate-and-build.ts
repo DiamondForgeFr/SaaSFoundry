@@ -9,7 +9,8 @@
 //   node --import tsx generate-and-build.ts  # runs all scenarios
 
 import { execFileSync, execSync, spawn, spawnSync } from 'child_process'
-import { existsSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'fs'
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
+import { createRequire } from 'module'
 import { join } from 'path'
 
 import {
@@ -204,6 +205,107 @@ function buildMonorepo(projectDir: string): void {
   run('npx turbo run build', projectDir, 'turbo run build')
 }
 
+type OpenApiDocument = {
+  paths?: Record<string, unknown>
+}
+
+const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+
+async function stopProcessGroup(child: ReturnType<typeof spawn>): Promise<void> {
+  if (!child.pid) return
+
+  try {
+    process.kill(-child.pid, 'SIGTERM')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return
+    throw error
+  }
+
+  const deadline = Date.now() + 2_000
+  while (Date.now() < deadline) {
+    try {
+      process.kill(-child.pid, 0)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return
+      throw error
+    }
+    await wait(50)
+  }
+
+  try {
+    process.kill(-child.pid, 'SIGKILL')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+  }
+}
+
+/**
+ * Recreate the checked-in snapshot through the generated application's real bootstrap.
+ * Removing it first prevents the scaffold fixture from satisfying the wait by itself.
+ */
+async function emitOpenApiDocument(projectDir: string): Promise<string> {
+  const apiDir = join(projectDir, 'apps', 'api')
+  const openApiPath = join(apiDir, 'docs', 'openapi.json')
+  const logPath = join(projectDir, 'openapi-emission.log')
+  if (existsSync(openApiPath)) unlinkSync(openApiPath)
+
+  startPostgres()
+  const databaseUrl = 'postgresql://dev:dev@localhost:5432/devdb'
+
+  const log = openSync(logPath, 'a')
+  const child = spawn(process.execPath, ['dist/src/main.js'], {
+    cwd: apiDir,
+    detached: true,
+    stdio: ['ignore', log, log],
+    env: {
+      ...process.env,
+      HUSKY: '0',
+      CI: 'true',
+      NODE_ENV: 'development',
+      DATABASE_URL: databaseUrl,
+      DIRECT_URL: databaseUrl
+    }
+  })
+
+  try {
+    const deadline = Date.now() + 30_000
+    while (!existsSync(openApiPath)) {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        const tail = existsSync(logPath) ? readFileSync(logPath, 'utf8').slice(-2_000) : '(no output captured)'
+        throw new Error(`generated API exited before emitting OpenAPI (exit=${child.exitCode}, signal=${child.signalCode})\n--- server output ---\n${tail}`)
+      }
+      if (Date.now() >= deadline) throw new Error('generated API did not emit docs/openapi.json within 30 seconds')
+      await wait(100)
+    }
+    return openApiPath
+  } finally {
+    await stopProcessGroup(child)
+    closeSync(log)
+  }
+}
+
+async function validateGeneratedApiContract(projectDir: string, projectName: string): Promise<AssertionResult[]> {
+  console.log('  > emit and validate OpenAPI, regenerate client, type-check client')
+  const openApiPath = await emitOpenApiDocument(projectDir)
+  const require = createRequire(join(process.cwd(), 'package.json'))
+  const SwaggerParser = require('@apidevtools/swagger-parser') as {
+    validate(path: string): Promise<OpenApiDocument>
+  }
+  const document = await SwaggerParser.validate(openApiPath)
+
+  run('npm run codegen:api-client', projectDir, 'regenerate api-client from emitted OpenAPI')
+  run(`npm run type-check -w @${projectName}/api-client`, projectDir, 'type-check regenerated api-client')
+
+  return [
+    {
+      passed: Object.prototype.hasOwnProperty.call(document.paths || {}, '/api/health'),
+      message: Object.prototype.hasOwnProperty.call(document.paths || {}, '/api/health')
+        ? 'OK: validated emitted OpenAPI includes /api/health'
+        : 'FAIL: validated emitted OpenAPI is missing /api/health'
+    }
+  ]
+}
+
 // ── Scenario Runners ───────────────────────────────────────────
 
 async function runGenerationScenario(scenario: GenerationScenario): Promise<boolean> {
@@ -221,6 +323,10 @@ async function runGenerationScenario(scenario: GenerationScenario): Promise<bool
 
   // Assertions
   const results: AssertionResult[] = []
+
+  if (scenario.validateApiContract === true) {
+    results.push(...(await validateGeneratedApiContract(projectDir, scenario.projectName)))
+  }
 
   const storageInstalled = scenario.s3Setup !== 'manual'
   const emailInstalled = scenario.emailService === 'mailersend'
@@ -761,11 +867,16 @@ async function runStep<T>(label: string, fn: () => Promise<T> | T): Promise<T> {
 
 /** Starts the cluster baked into the image and creates the role and database the project expects. */
 function startPostgres(): void {
-  const pg = (cmd: string) => execSync(`su postgres -c ${JSON.stringify(cmd)}`, { stdio: 'pipe' })
+  const pg = (cmd: string) => execSync(`su postgres -c ${JSON.stringify(cmd)}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
-  pg(`pg_ctl -D ${process.env.PGDATA} -o "-c listen_addresses=localhost" -l /tmp/pg.log start -w -t 30`)
-  pg('createuser -s dev')
-  pg('createdb -O dev devdb')
+  try {
+    pg(`pg_ctl -D ${process.env.PGDATA} status`)
+  } catch {
+    pg(`pg_ctl -D ${process.env.PGDATA} -o "-c listen_addresses=localhost" -l /tmp/pg.log start -w -t 30`)
+  }
+
+  if (pg(`psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'dev'"`).trim() !== '1') pg('createuser -s dev')
+  if (pg(`psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'devdb'"`).trim() !== '1') pg('createdb -O dev devdb')
 }
 
 interface Server {

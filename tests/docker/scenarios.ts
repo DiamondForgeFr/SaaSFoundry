@@ -16,6 +16,8 @@ export interface GenerationScenario {
   includeAnalytics: boolean
   /** Optional so the 19 existing scenarios keep their shape; only the PWA scenario opts in. */
   includePwa?: boolean
+  /** Exercise the emitted OpenAPI -> generated client contract after the normal build. */
+  validateApiContract?: boolean
 }
 
 export interface UpdateScenario {
@@ -143,7 +145,8 @@ export const ALL_SCENARIOS: TestScenario[] = [
     dbSetup: 'manual',
     s3Setup: 'manual',
     emailService: 'none',
-    includeAnalytics: false
+    includeAnalytics: false,
+    validateApiContract: true
   },
 
   // ── Priority 3-4: Full builds (all modules) ──────────────────
