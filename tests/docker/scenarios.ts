@@ -168,7 +168,8 @@ export const ALL_SCENARIOS: TestScenario[] = [
     dbSetup: 'docker',
     s3Setup: 'docker',
     emailService: 'mailersend',
-    includeAnalytics: true
+    includeAnalytics: true,
+    validateApiContract: true
   },
 
   // ── Priority 5-6: Update flows (most complex) ────────────────

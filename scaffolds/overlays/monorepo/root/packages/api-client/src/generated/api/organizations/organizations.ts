@@ -21,7 +21,7 @@ import type {
   UseQueryResult
 } from '@tanstack/react-query'
 
-import type { CreateOrganizationDto, FetchOrganizationResponseDto, UpdateOrganizationDto } from '.././model'
+import type { CreateOrganizationDto, FetchOrganizationResponseDto, OrganizationControllerUploadLogoBody, UpdateOrganizationDto } from '.././model'
 
 import { apiClientMutator } from '../../../http-client'
 import type { ErrorType, BodyType } from '../../../http-client'
@@ -176,6 +176,51 @@ export const useOrganizationControllerCreateOrganization = <TError = ErrorType<v
   queryClient?: QueryClient
 ): UseMutationResult<Awaited<ReturnType<typeof organizationControllerCreateOrganization>>, TError, { data: BodyType<CreateOrganizationDto> }, TContext> => {
   const mutationOptions = getOrganizationControllerCreateOrganizationMutationOptions(options)
+
+  return useMutation(mutationOptions, queryClient)
+}
+/**
+ * Upload a logo image for the organization.
+ * @summary Upload organization logo
+ */
+export const organizationControllerUploadLogo = (id: string, organizationControllerUploadLogoBody: BodyType<OrganizationControllerUploadLogoBody>, signal?: AbortSignal) => {
+  const formData = new FormData()
+  formData.append(`file`, organizationControllerUploadLogoBody.file)
+
+  return apiClientMutator<FetchOrganizationResponseDto>({ url: `/api/organizations/${id}/logo`, method: 'POST', headers: { 'Content-Type': 'multipart/form-data' }, data: formData, signal })
+}
+
+export const getOrganizationControllerUploadLogoMutationOptions = <TError = ErrorType<void>, TContext = unknown>(options?: {
+  mutation?: UseMutationOptions<Awaited<ReturnType<typeof organizationControllerUploadLogo>>, TError, { id: string; data: BodyType<OrganizationControllerUploadLogoBody> }, TContext>
+}): UseMutationOptions<Awaited<ReturnType<typeof organizationControllerUploadLogo>>, TError, { id: string; data: BodyType<OrganizationControllerUploadLogoBody> }, TContext> => {
+  const mutationKey = ['organizationControllerUploadLogo']
+  const { mutation: mutationOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } }
+
+  const mutationFn: MutationFunction<Awaited<ReturnType<typeof organizationControllerUploadLogo>>, { id: string; data: BodyType<OrganizationControllerUploadLogoBody> }> = (props) => {
+    const { id, data } = props ?? {}
+
+    return organizationControllerUploadLogo(id, data)
+  }
+
+  return { mutationFn, ...mutationOptions }
+}
+
+export type OrganizationControllerUploadLogoMutationResult = NonNullable<Awaited<ReturnType<typeof organizationControllerUploadLogo>>>
+export type OrganizationControllerUploadLogoMutationBody = BodyType<OrganizationControllerUploadLogoBody>
+export type OrganizationControllerUploadLogoMutationError = ErrorType<void>
+
+/**
+ * @summary Upload organization logo
+ */
+export const useOrganizationControllerUploadLogo = <TError = ErrorType<void>, TContext = unknown>(
+  options?: { mutation?: UseMutationOptions<Awaited<ReturnType<typeof organizationControllerUploadLogo>>, TError, { id: string; data: BodyType<OrganizationControllerUploadLogoBody> }, TContext> },
+  queryClient?: QueryClient
+): UseMutationResult<Awaited<ReturnType<typeof organizationControllerUploadLogo>>, TError, { id: string; data: BodyType<OrganizationControllerUploadLogoBody> }, TContext> => {
+  const mutationOptions = getOrganizationControllerUploadLogoMutationOptions(options)
 
   return useMutation(mutationOptions, queryClient)
 }

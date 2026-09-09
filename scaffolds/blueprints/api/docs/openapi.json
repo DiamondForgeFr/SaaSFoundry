@@ -1501,6 +1501,63 @@
         ]
       }
     },
+    "/api/organizations/{id}/logo": {
+      "post": {
+        "description": "Upload a logo image for the organization.",
+        "operationId": "OrganizationController_uploadLogo",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Organization ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Logo file (jpeg, png, webp, svg — max 5MB)",
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Logo image file"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logo uploaded successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FetchOrganizationResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid file type or size"
+          }
+        },
+        "summary": "Upload organization logo",
+        "tags": [
+          "Organizations"
+        ]
+      }
+    },
     "/api/entities": {
       "post": {
         "description": "Create a new entity and link it to an account and organization.",
