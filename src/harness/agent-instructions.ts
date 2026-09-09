@@ -68,7 +68,10 @@ asking about configured scope, tools or modules. Follow its output language and 
 Discover shared skills under \`.agents/skills/sf-*/SKILL.md\`. Before a status transition,
 read the matching status document and execute the existing workflow CLI:
 \`.claude/skills/sf-workflow/workflow-cli.sh\`. Use its configured board tool, not raw mutations.
-Commit and push before AI testing; preserve Human testing requirements and merge before Done.
+Commit and push before AI testing; preserve Human testing requirements. Delivery tickets
+need a verified merge before Done, except for a validated \`nature:bundled-pr\` child whose
+commit ships in its non-Epic delivery parent's PR. An Epic has no PR: its first child entering
+In progress starts it, and it reaches Done only after every native child has board status Done.
 
 ${CAPABILITIES}`
 

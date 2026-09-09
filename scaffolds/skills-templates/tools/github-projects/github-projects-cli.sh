@@ -847,6 +847,140 @@ cmd_get_labels() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────
+# Commands: list-incomplete-children / get-parent — native GitHub issue hierarchy
+# ───────────────────────────────────────────────────────────────────────────
+#
+# These use GitHub's REST sub-issues endpoints rather than title/body search.
+# The hierarchy is native data, and title conventions are not a reliable source
+# of truth. list-incomplete-children means "not complete in the configured board":
+# it returns native children whose project Status is not Done, including ones
+# that cannot be verified on that board. Both commands propagate request and
+# JSON failures so workflow guards fail closed rather than assuming success.
+
+cmd_list_incomplete_children() {
+  if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 list-incomplete-children <parent-ticket-number>" >&2
+    exit 1
+  fi
+
+  local parent=$1 repo payload children child info title status result='[]'
+  load_config
+  repo=$(get_repo_owner_name)
+  if [[ -z "$repo" || "$repo" != */* ]]; then
+    echo "Error: could not resolve the current repository." >&2
+    return 1
+  fi
+
+  # GitHub caps per_page at 100. --paginate follows every Link header and
+  # --slurp preserves page boundaries, which lets jq reject malformed output.
+  payload=$(gh api --paginate --slurp \
+    -H "Accept: application/vnd.github+json" \
+    "repos/${repo}/issues/${parent}/sub_issues?per_page=100" 2>/dev/null) || {
+      echo "Error: could not list child issues for #${parent}." >&2
+      return 1
+    }
+
+  children=$(printf '%s' "$payload" | jq -ce '
+    if type == "array" and all(.[]; type == "array") then
+      [.[][] | if (.number | type) == "number" then .number else error("Expected child issue number") end]
+    else
+      error("Expected paginated sub-issue arrays")
+    end
+  ' || {
+    echo "Error: invalid child-issues response for #${parent}." >&2
+    return 1
+  })
+
+  while IFS= read -r child; do
+    [ -z "$child" ] && continue
+    info=$(query_project_item "$child") || {
+      echo "Error: could not retrieve project status for child #${child}." >&2
+      return 1
+    }
+    status=$(printf '%s' "$info" | jq -er '
+      if type == "object" and has("status") then .status // "" else error("Expected project item") end
+    ') || {
+      echo "Error: invalid project status for child #${child}." >&2
+      return 1
+    }
+    title=$(printf '%s' "$info" | jq -er '
+      if type == "object" and (.title | type == "string") then .title else error("Expected child title") end
+    ') || {
+      echo "Error: invalid title for child #${child}." >&2
+      return 1
+    }
+    if [[ "$(echo "$status" | tr '[:upper:]' '[:lower:]' | awk '{$1=$1;print}')" == "done" ]]; then
+      continue
+    fi
+    result=$(jq -cn --argjson existing "$result" --argjson number "$child" --arg title "$title" --arg status "$status" \
+      '$existing + [{number:$number, title:$title, status:(if $status == "" then null else $status end)}]') || {
+        echo "Error: could not assemble child status response for #${parent}." >&2
+        return 1
+      }
+  done < <(printf '%s' "$children" | jq -r '.[]')
+
+  printf '%s\n' "$result"
+}
+
+cmd_get_parent() {
+  if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 get-parent <child-ticket-number>" >&2
+    exit 1
+  fi
+
+  local child=$1 repo payload
+  repo=$(get_repo_owner_name)
+  if [[ -z "$repo" || "$repo" != */* ]]; then
+    echo "Error: could not resolve the current repository." >&2
+    return 1
+  fi
+
+  payload=$(gh api -H "Accept: application/vnd.github+json" \
+    "repos/${repo}/issues/${child}/parent" 2>/dev/null) || {
+      echo "Error: could not retrieve the parent of #${child}." >&2
+      return 1
+    }
+
+  printf '%s' "$payload" | jq -ce '
+    if type == "object" and (.number | type == "number") then .
+    else error("Expected a parent issue object")
+    end
+  ' || {
+    echo "Error: invalid parent-issue response for #${child}." >&2
+    return 1
+  }
+}
+
+cmd_get_issue_type() {
+  if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 get-issue-type <ticket-number>" >&2
+    exit 1
+  fi
+
+  local ticket=$1 repo owner name payload
+  repo=$(get_repo_owner_name)
+  if [[ -z "$repo" || "$repo" != */* ]]; then
+    echo "Error: could not resolve the current repository." >&2
+    return 1
+  fi
+  owner=${repo%/*}
+  name=${repo#*/}
+  payload=$(gh api graphql -F owner="$owner" -F name="$name" -F number="$ticket" \
+    -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){issueType{name}}}}' \
+    2>/dev/null) || {
+      echo "Error: could not retrieve issue type for #${ticket}." >&2
+      return 1
+    }
+  printf '%s' "$payload" | jq -ce '
+    .data.repository.issue.issueType
+    | if type == "object" and (.name | type == "string") then . else error("Expected issue type") end
+  ' || {
+    echo "Error: invalid issue-type response for #${ticket}." >&2
+    return 1
+  }
+}
+
+# ───────────────────────────────────────────────────────────────────────────
 # Command: get-ticket — used by detect-complexity.sh
 # ───────────────────────────────────────────────────────────────────────────
 
@@ -1672,6 +1806,9 @@ case "$COMMAND" in
   set-complexity)     cmd_set_complexity "$@" ;;
   get-complexity)     cmd_get_complexity "$@" ;;
   get-labels)         cmd_get_labels "$@" ;;
+  list-incomplete-children) cmd_list_incomplete_children "$@" ;;
+  get-parent)         cmd_get_parent "$@" ;;
+  get-issue-type)     cmd_get_issue_type "$@" ;;
   get-ticket)         cmd_get_ticket "$@" ;;
   create-pr)          cmd_create_pr "$@" ;;
   ready-pr)           cmd_ready_pr "$@" ;;
@@ -1696,6 +1833,9 @@ case "$COMMAND" in
     echo "  set-complexity <ticket> <level>          bug | low | medium | complex"
     echo "  get-complexity <ticket>                  Read current complexity label"
     echo "  get-labels <ticket>                      Print every label name (one per line)"
+    echo "  list-incomplete-children <parent>       Print native children whose board Status is not Done"
+    echo "  get-parent <child>                      Print the native parent issue as JSON"
+    echo "  get-issue-type <ticket>                 Print the native issue type as JSON"
     echo "  get-ticket <ticket>                      Print title + body (for scripting)"
     echo "  create-pr <ticket> [--draft]             Open PR for current branch"
     echo "  ready-pr <ticket>                        Mark the ticket PR ready for review"
@@ -1710,7 +1850,7 @@ case "$COMMAND" in
     ;;
   *)
     echo -e "${RED}Error: Unknown command '${COMMAND}'${NC}"
-    echo "Available: create-subtask, status, update-status, set-complexity, get-complexity, get-labels, get-ticket, create-pr, ready-pr, draft-pr, list, cache-clear, ensure-issue-types, assign-type, delete-issue-type"
+    echo "Available: create-subtask, status, update-status, set-complexity, get-complexity, get-labels, list-incomplete-children, get-parent, get-issue-type, get-ticket, create-pr, ready-pr, draft-pr, list, cache-clear, ensure-issue-types, assign-type, delete-issue-type"
     exit 1
     ;;
 esac

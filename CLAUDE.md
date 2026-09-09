@@ -30,8 +30,8 @@ all three surfaces (`srs`, `tickets`, `codeComments`).
 
 - **Statuses**: `Backlog → Ready → In progress → AI testing → Human testing → In review → Done`
 - **Before any status transition**: read `.claude/skills/sf-workflow/statuses/<N>-<name>.md` for mandatory actions and exit conditions
-- **Never skip statuses.** In particular: never go Backlog → AI Testing, open a draft PR for Human Testing and never mark it ready before human validation (unless ticket carries `nature:internal`),
-  never mark Done before the PR is merged
+- **Never skip statuses.** In particular: never go Backlog → AI Testing, open a draft PR for Human Testing and never mark it ready before human validation (unless ticket carries `nature:internal`).
+  Delivery tickets require a verified merged PR before Done, except validated `nature:bundled-pr` children. Epics own no PR and reach Done only after every native child has board status Done.
 - **Nature axis (Human Testing optionality)** — `nature:internal` tickets (refactor / scaffolding / non-terminal stories of an Epic) may transition AI Testing → In Review directly. Default (no label
   or `nature:user-facing`) requires Human Testing. The `update-status` guard enforces this — see `.claude/skills/sf-workflow/SKILL.md` "Nature axis" section.
 - **Never bypass the CLI**: use `.claude/skills/sf-workflow/workflow-cli.sh` and `.claude/skills/sf-tool-github-projects/github-projects-cli.sh` — not raw `gh api graphql` mutations

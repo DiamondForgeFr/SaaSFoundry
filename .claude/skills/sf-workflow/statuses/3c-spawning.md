@@ -30,7 +30,7 @@ Turn the approved SRS page into the matching tickets that will drive implementat
   - dispatches to `.claude/skills/sf-srs/scripts/srs-cli.sh spawn --ticket <ticket>`
   - renders ticket templates from `sf-srs/templates/tickets/` (Epic or Story)
   - creates children on the configured workflow tool — each lands in **Backlog**, no `srs:*` label
-- [ ] **Verify the children:** `gh issue list --search "parent #<ticket>"` — sanity-check titles, empty complexity tags (detected later), back-links to the backend page
+- [ ] **Verify the children:** `github-projects-cli.sh list-incomplete-children <ticket>` — every newly spawned child must appear with its title and Backlog status; then inspect its backend-page link
 - [ ] **Clear the SRS label:** once children exist, remove the `srs:*` label (the `done` phase handles this if the adapter supports it; otherwise `gh issue edit <ticket> --remove-label srs:drafting`)
 - [ ] **Close the drafting ticket:** `.claude/skills/sf-workflow/workflow-cli.sh transition-drafting <ticket> done` — internally calls `update-status <ticket> Done` with
       `SF_WORKFLOW_BYPASS_SRS_GUARD=1`

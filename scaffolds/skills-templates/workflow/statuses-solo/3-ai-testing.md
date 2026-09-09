@@ -4,7 +4,7 @@ banner_ai: Post the test plan, run automated + manual tests, fix on red, post th
 banner_human: Nothing yet — get ready to review the PR (your review is the validation gate)
 complexity_profiles: [bug, low, medium, complex]
 entry_conditions:
-  - All subtasks completed in In Progress
+  - All child tickets completed in In Progress
   - Code pushed and ready for testing
 mandatory_actions:
   - Generate test plan and post as ticket comment
@@ -27,6 +27,9 @@ next_status: In Review (create PR) | Done (nature:bundled-pr Subs only)
 
 Automated validation + test plan execution. In the solo workflow this is the only testing status — the developer validates during PR review, so the test report must give them everything they need to review efficiently.
 
+Aggregate Epics never enter this status. They stay `In progress` while their delivery children pass through testing
+and review, then roll directly to `Done` after the last child reaches `Done`.
+
 ## Action checklist
 
 - [ ] **Test plan** — post a comment covering: setup, nominal + edge scenarios, expected results per scenario, non-regression coverage
@@ -38,7 +41,7 @@ Automated validation + test plan execution. In the solo workflow this is the onl
       automated tests.
 - [ ] **On green** — post the test report summary (include examine findings if complex), then:
   - default: create the PR and move to **In Review**
-  - `nature:bundled-pr` Subs: move to **Done** directly (no individual PR — the merge happens via the parent Epic's bundled PR)
+  - `nature:bundled-pr` children: move to **Done** directly (no individual PR — the delivery parent owns the branch and PR)
 
 ## Errors to avoid
 

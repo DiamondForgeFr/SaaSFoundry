@@ -4,11 +4,8 @@ banner_ai: Post the test plan, run automated + manual tests, fix on red, post th
 banner_human: Nothing yet — get ready to test manually (user-facing) or review the PR (internal)
 complexity_profiles: [bug, low, medium, complex]
 entry_conditions:
-  - All subtasks completed in In Progress
-  - All subtasks CLOSED on GitHub (issues closed, not just merged)
   - Code pushed and ready for testing
 mandatory_actions:
-  - Gate check — zero open children (`gh issue list --state open --search "parent #<N>"` must be `[]`)
   - Generate test plan and post as ticket comment
   - Move ticket to `AI Testing`
   - Run automated tests (build, lint, type-check, unit tests)
@@ -29,9 +26,10 @@ next_status: Human Testing (default) | In Review (nature:internal) | Done (natur
 
 First automated validation + test plan execution.
 
+Aggregate Epics never enter this status. They stay `In progress` while their delivery children pass through testing and review, then roll directly to `Done` after the last child reaches `Done`.
+
 ## Action checklist
 
-- [ ] **Gate:** `gh issue list --state open --search "parent #<N>"` returns `[]`. If not — back to In Progress, close children, then return.
 - [ ] **Test plan** — post a comment covering: setup, nominal + edge scenarios, expected results per scenario, non-regression coverage
 - [ ] **Move ticket** to `AI Testing` via `workflow-cli.sh update-status`
 - [ ] **Automated tests:** `npm run build` → `npm run lint` → `npm run type-check` (if TS) → `npm run test:unit`
@@ -48,7 +46,7 @@ First automated validation + test plan execution.
   - `nature:internal`: open a ready PR with `workflow-cli.sh create-pr <ticket>` (or promote an existing draft with `ready-pr <ticket>`), then → **In Review** directly (skip Human Testing — see
     SKILL.md "Nature axis" section). The transition is enforced by the workflow guard.
 
-  - `nature:bundled-pr`: → **Done** after validation; no individual draft or ready PR. The parent owns the PR and human validation.
+  - `nature:bundled-pr`: → **Done** after validation; no individual draft or ready PR. The delivery parent owns the branch, PR, and human validation.
 
 ## Errors to avoid
 
@@ -57,4 +55,4 @@ First automated validation + test plan execution.
 - Saying "it should work" — RUN the tests
 - Skipping examine for complex tickets
 - Ignoring Critical/High security findings
-- Entering AI Testing while subtasks are still OPEN on GitHub (gate rule)
+- Marking the parent Done while child tickets are still open or not yet Done (the Done gate is mandatory)

@@ -98,7 +98,8 @@ $CLI create-subtask 42 "Backend endpoint"
 $CLI create-subtask 42 "Integration test"
 ```
 
-Sub-issues are linked via the GraphQL `addSubIssue` mutation, which powers the `parent #42` search operator. This is what enforces the "zero-open-children" gate before moving the parent forward.
+Sub-issues are linked via the GraphQL `addSubIssue` mutation. The workflow reads that native hierarchy through GitHub's sub-issues API: a parent cannot move to `Done` until every child has
+project-board Status `Done`. An Epic also moves to `In progress` with its first active child and to `Done` with its last completed child.
 
 ## Step 4 — Code the feature
 

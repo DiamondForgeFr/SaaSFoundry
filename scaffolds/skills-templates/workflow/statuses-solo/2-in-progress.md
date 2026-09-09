@@ -1,6 +1,6 @@
 ---
 status: In Progress
-banner_ai: Branch from workingBranch, one commit per subtask, validate (build/lint/tests), push
+banner_ai: Branch from workingBranch, deliver child tickets, validate (build/lint/tests), push
 banner_human: Nothing yet — next involvement at In Review (PR review is the human gate)
 complexity_profiles: [bug, low, medium, complex]
 entry_conditions:
@@ -9,11 +9,10 @@ entry_conditions:
 mandatory_actions:
   - Create feature branch from `workingBranch` (manifest)
   - Move ticket to `In Progress`
-  - Develop iteratively — one commit per subtask, close each subtask right after its commit lands
+  - Deliver each child ticket in its declared mode; close it immediately when its PR is merged or its bundled commit is validated
   - Final validation — build, lint, unit tests green
   - Push branch
 exit_conditions:
-  - All subtasks closed on GitHub (`gh issue list --state open --search "parent #<N>"` returns [])
   - Code compiles without errors
   - Lint passes
   - Existing tests pass
@@ -27,10 +26,9 @@ Active development — subtask creation, iterative commits, final validation.
 
 ## Ticket type
 
-- **Epic** (`type: epic`): no branch, no commit, no PR. Skip "Branch + develop" + "Final validation" below. Only create children via `create-subtask` and coordinate. Epic status is **derived** — moves
-  to `In progress` automatically when the first child does.
+- **Epic** (`sf-epic` issue type): optional grouping ticket; no branch, commit, or PR. Only create and coordinate delivery-parent children. Epic status is **derived** from those children.
 - **Story / Task / Issue**: full flow below.
-- **Subtask**: a commit on the current branch, not a GitHub issue. Do not use `create-subtask`.
+- **Child ticket**: always a native GitHub sub-issue created with `create-subtask`. A normal child owns its branch and PR; a `nature:bundled-pr` child contributes one atomic commit on this parent's branch and has no own PR.
 
 ## SRS drafting tickets (`srs:drafting | srs:update | srs:new`)
 
@@ -42,8 +40,8 @@ These stay in the `In progress` board column but flow through a **separate lifec
 - [ ] **Branch** — from `jq -r '.workflow.workingBranch' .saasfoundry.json`, pattern `jq -r '.workflow.branchNaming.feature'`
   - `git checkout <workingBranch> && git pull --rebase && git checkout -b feature/<N>-<description>`
 - [ ] **Move ticket to "In Progress"** via `workflow-cli.sh update-status <ticket> "In progress"`
-- [ ] **Per subtask:** code → commit (`<type>(#<N>): <description>`) — one commit per logical subtask
-- [ ] **All subtasks done:** `npm run build && npm run lint` → tests → push
+- [ ] **Per normal child:** branch → code → PR → verify merge → close the child; per bundled child: one atomic commit on the parent's branch → validate → close the child
+- [ ] **Parent implementation done:** `npm run build && npm run lint` → tests → push. Child tickets may continue through their own lifecycle.
 
 ## Errors to avoid
 

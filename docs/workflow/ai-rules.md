@@ -48,38 +48,41 @@ against a consistent state.
 
 **How to apply:** the last action of "In progress" is `git push`. Only then does the agent request the transition to AI testing. If the agent tries to transition without pushing, the gate check fails.
 
-## 5. Subtasks are real GitHub issues
+## 5. Child tickets are native GitHub sub-issues
 
-When an In-progress ticket needs decomposition, subtasks are created as **real GitHub issues linked via the sub-issue relationship** — not as markdown checkboxes in the parent.
+When an In-progress ticket needs decomposition, child tickets are created as **native GitHub sub-issues linked via the sub-issue relationship** — not as markdown checkboxes in the parent. A normal
+child owns its own branch and PR. A bundled child carries `nature:bundled-pr`, contributes one atomic commit on the delivery parent's branch, and has no individual PR.
 
 **Why:** checkboxes are cosmetic — they don't show up in search, assignees can't be tracked, they don't block parent transitions, and they disappear if someone edits the parent body. Real sub-issues
-participate in the board, respect complexity labels independently, and can gate the parent's transitions.
+participate in the board, respect complexity labels independently, and are visible in the parent's delivery state.
 
 **How to apply:** use `github-projects-cli.sh create-subtask <parent> "<title>"`. The CLI handles the GraphQL `addSubIssue` mutation. Never create subtasks with raw `gh issue create`.
 
-## 6. Close subtasks as you go
+## 6. Close child tickets as they are delivered
 
-After a subtask's commit lands, **immediately** close the corresponding issue — don't batch closures at the end of the parent ticket.
+After a normal child's PR is verified merged, or a bundled child's atomic commit is validated on the delivery parent's branch, **immediately** close the corresponding issue — don't batch closures at
+the end of the parent ticket.
 
 **Why:** the board state must reflect reality at all times. Merging code while leaving the subtask open creates an inconsistent state: the code is done, the board says it isn't. When the parent
-transitions to AI testing, the zero-open-children gate (rule 7) fails and the agent has to context-switch back to close every subtask at once — losing the link between each closure and its
-corresponding commit.
+transitions to Done, the child-status gate fails and the agent has to context-switch back to close every child at once — losing the link between each closure and its delivery.
 
-**How to apply:** after `git push` for a subtask commit, run `workflow-cli.sh update-status <sub> Done` and verify `gh issue view <sub> --json state` prints `CLOSED` before moving to the next subtask.
+**How to apply:** run `workflow-cli.sh update-status <child> Done` after the child's delivery is verified and confirm `gh issue view <child> --json state` prints `CLOSED` before moving to the next
+child.
 
-## 7. Gate parent transitions on open children
+## 7. Gate parent Done on child completion
 
-Before any parent transition (`AI testing` → `Human testing` → `In review` → `Done`), run:
+Before moving a parent to `Done`, inspect every native child ticket and verify that each is already `Done`:
 
 ```bash
-gh issue list --state open --search "parent #<N>"
+.claude/skills/sf-tool-github-projects/github-projects-cli.sh list-incomplete-children <N>
 ```
 
-The output must be `[]`. If any children are open, go back to In progress, close them, and only then re-attempt the parent transition.
+The command uses GitHub's native sub-issue relationship and returns every child whose project-board Status is not exactly `Done`. Any child in Backlog, Ready, In progress, AI testing, Human testing,
+In review, or an unknown status blocks the parent. Incomplete children do not block AI Testing, Human Testing, or In Review.
 
 **Why:** same invariant as rule 6, enforced at transition time as a last-resort check. Catches cases where rule 6 was accidentally violated.
 
-**How to apply:** the status description for `4-ai-testing.md` runs this check as step 0 (before generating the test plan). The agent never skips step 0.
+**How to apply:** the status description for `7-done.md` requires this check before the transition. The agent never skips it.
 
 ## 8. Finish the current ticket before starting another
 
@@ -98,7 +101,7 @@ user. Every shortcut we take is a shortcut users will inherit.
 The rules exist because we have already felt the pain of each one being violated:
 
 - Rule 4 came from a session where we ran AI testing on local code that was never pushed — the test plan validated nothing.
-- Rules 5–7 came from a parent-child inconsistency that left subtasks open after the parent was merged.
+- Rules 5–7 came from a parent-child inconsistency that left child tickets open after the parent was marked Done.
 - Rule 8 came from multiple incidents where a half-done ticket bled into a new one and corrupted both branches.
 
 If you catch the agent violating any of these, the correct response is to reset to the last known-good state and restart the phase — not to paper over the violation.

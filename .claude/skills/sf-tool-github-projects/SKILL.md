@@ -41,6 +41,9 @@ All via `.claude/skills/sf-tool-github-projects/github-projects-cli.sh <cmd> [ar
 | `set-complexity <ticket> <level>`        | Set label `complexity: <bug\|low\|medium\|complex>` (removes any existing complexity label first) |
 | `get-complexity <ticket>`                | Read current complexity label                                                                     |
 | `get-labels <ticket>`                    | Print every label name, one per line (used by `sf-workflow` SRS guard)                            |
+| `list-incomplete-children <parent>`      | List native children whose configured project Status is not exactly `Done`                        |
+| `get-parent <child>`                     | Read a ticket's native parent issue                                                               |
+| `get-issue-type <ticket>`                | Read the native organization issue type                                                           |
 | `get-ticket <ticket>`                    | Print title + body (used by `detect-complexity.sh`)                                               |
 | `create-pr <ticket> [--draft]`           | Push branch + open/reuse PR against `workingBranch`; preserve existing draft state                |
 | `list [status]`                          | List project items, optionally filtered by status                                                 |

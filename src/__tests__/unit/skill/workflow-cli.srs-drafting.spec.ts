@@ -63,6 +63,9 @@ case "$1" in
       printf '%s\\n' "\${FAKE_LABELS}"
     fi
     ;;
+  list-incomplete-children)
+    printf '%s' '[]'
+    ;;
   status)
     echo "Status: \${FAKE_BOARD_STATUS:-In progress}"
     ;;

@@ -14,8 +14,8 @@ const BASH = '/bin/bash'
 // The PR-existence guard blocks `update-status N "In review"` when no open PR
 // is found for the ticket. `In Review` without a PR is a board lie: the entry
 // condition for that status (per statuses/6-in-review.md) is "Create the PR".
-// We codified the rule in the CLI itself because the agent kept moving Subs
-// to In Review when their PR was bundled at the parent Epic level — surfaced
+// We codified the rule in the CLI itself because the agent kept moving bundled
+// children to In Review even though their PR lives at the delivery-parent level — surfaced
 // by the user as "j'ai l'impression du demande souvent de review des ticket
 // sans PR associé".
 
@@ -68,6 +68,15 @@ printf '%s\\n' "$*" >> '${toolLogPath}'
 case "$1" in
   get-labels)
     ${labelsBlock}
+    ;;
+  list-incomplete-children)
+    printf '%s' '[]'
+    ;;
+  get-parent)
+    printf '%s' '{"number":7}'
+    ;;
+  get-issue-type)
+    printf '%s' '{"name":"${options.issueType ?? 'sf-task'}"}'
     ;;
   status)
     printf 'Status: %s\\n' "${currentStatus}"
@@ -223,14 +232,18 @@ describe('sf-workflow CLI — PR-existence guard (→ In Review)', () => {
     }
   )
 
-  it('allows PR-less native Epic groupers to derive Human Testing', async () => {
+  it('keeps PR-less native Epic groupers in their derived lifecycle', async () => {
     sandbox = await buildSandbox('[]', { currentStatus: 'AI testing', issueType: 'sf-epic' })
-    expect((await runCli(['update-status', '42', 'Human testing'], sandbox)).code).toBe(0)
+    const res = await runCli(['update-status', '42', 'Human testing'], sandbox)
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain('aggregate Epic #42')
   })
 
-  it('still verifies the draft state when an Epic has a delivery PR', async () => {
+  it('rejects Human Testing even when an Epic has an accidental delivery PR', async () => {
     sandbox = await buildSandbox('[{"number":555,"headRefName":"feature/42-work","isDraft":false}]', { currentStatus: 'AI testing', issueType: 'sf-epic' })
-    expect((await runCli(['update-status', '42', 'Human testing'], sandbox)).code).toBe(2)
+    const res = await runCli(['update-status', '42', 'Human testing'], sandbox)
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain('aggregate Epic #42')
   })
 
   it('does not match a different ticket whose number is a prefix (4 vs 42)', async () => {
@@ -253,7 +266,7 @@ describe('sf-workflow CLI — bundled-PR path (AI Testing → Done)', () => {
     const res = await runCli(['update-status', '42', 'Done'], sandbox)
     expect(res.code).toBe(0)
     const toolCalls = readLog(sandbox.toolLogPath).filter((l) => l.startsWith('update-status'))
-    expect(toolCalls).toHaveLength(1)
+    expect(toolCalls[0]).toBe('update-status 42 Done')
   })
 
   it('blocks AI Testing → Done when ticket lacks nature:bundled-pr', async () => {
@@ -279,11 +292,12 @@ describe('sf-workflow CLI — bundled-PR path (AI Testing → Done)', () => {
     expect(res.stderr).toContain("cannot enter 'In Review'")
   })
 
-  it('does not block In Review → Done (regression — only AI Testing → Done is gated by nature)', async () => {
+  it('requires a verified merged PR for In Review → Done', async () => {
     sandbox = await buildSandbox('[]', { natureLabel: 'internal', currentStatus: 'In Review' })
     const res = await runCli(['update-status', '42', 'Done'], sandbox)
-    expect(res.code).toBe(0)
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain('no verified merged PR')
     const toolCalls = readLog(sandbox.toolLogPath).filter((l) => l.startsWith('update-status'))
-    expect(toolCalls).toHaveLength(1)
+    expect(toolCalls).toEqual([])
   })
 })

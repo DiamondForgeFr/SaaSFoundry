@@ -127,7 +127,7 @@ export function buildWorkflowLabels(opts: { srs: boolean }): LabelDef[] {
     // Nature — Human Testing / In Review optionality (managed by sf-workflow)
     { name: 'nature:user-facing', color: '0E8A16', description: 'Workflow: ticket has user-visible impact, requires Human Testing' },
     { name: 'nature:internal', color: 'C5DEF5', description: 'Workflow: refactor/scaffolding/non-terminal story, Human Testing optional' },
-    { name: 'nature:bundled-pr', color: 'FBCA04', description: "Workflow: Sub merged via parent Epic's bundled PR, skips In Review" }
+    { name: 'nature:bundled-pr', color: 'FBCA04', description: 'Workflow: bundled child commit on delivery parent branch, skips In Review' }
   ]
 
   if (opts.srs) {

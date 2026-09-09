@@ -328,8 +328,8 @@ check_complexity_guard() {
 #   - `nature:internal`                  → AI Testing → In Review → Done (skip Human Testing)
 #   - `nature:bundled-pr`                → AI Testing → Done (skip Human Testing AND In Review)
 #
-# `nature:bundled-pr` is for Sub-stories of an Epic whose merge happens via the
-# Epic's single bundled PR — there is no individual PR to review at this level,
+# `nature:bundled-pr` is for a native child whose merge happens via a verified
+# non-Epic delivery parent — there is no individual PR to review at this level,
 # so In Review would always be a lie. See SKILL.md "Nature axis".
 #
 # Two firing points:
@@ -383,7 +383,7 @@ check_nature_guard() {
     if ! status_in_sequence "Human Testing"; then
       if [[ "$nature" == "bundled-pr" ]]; then
         echo -e "${RED}✗ Ticket #${ticket} is 'nature:bundled-pr' — cannot enter 'In Review'.${NC}" >&2
-        echo "  Bundled-PR tickets go AI Testing → Done directly (PR at the parent Epic)." >&2
+        echo "  Bundled-PR tickets go AI Testing → Done directly (PR at the delivery parent)." >&2
         return 1
       fi
       return 0
@@ -394,8 +394,8 @@ check_nature_guard() {
     if [[ "$nature" == "bundled-pr" ]]; then
       echo -e "${RED}✗ Ticket #${ticket} is 'nature:bundled-pr' — cannot enter 'In Review'.${NC}" >&2
       echo "" >&2
-      echo "  Bundled-PR tickets have no individual PR (merge happens via the parent" >&2
-      echo "  Epic's single PR). They go AI Testing → Done directly." >&2
+      echo "  Bundled-PR tickets have no individual PR (merge happens via the verified" >&2
+      echo "  non-Epic delivery parent). They go AI Testing → Done directly." >&2
       echo "" >&2
       echo "  Move to Done instead:" >&2
       echo "    .claude/skills/sf-workflow/workflow-cli.sh update-status ${ticket} Done" >&2
@@ -411,7 +411,7 @@ check_nature_guard() {
     echo "" >&2
     echo "  Use 'nature:internal' for refactors, scaffolding, internal tooling, or" >&2
     echo "  non-terminal stories of a multi-step Epic that ship their own PR." >&2
-    echo "  Use 'nature:bundled-pr' for Subs whose PR is bundled at the Epic level." >&2
+    echo "  Use 'nature:bundled-pr' for native children delivered by their parent PR." >&2
     echo "  Escape hatch (rare): SF_WORKFLOW_BYPASS_NATURE_GUARD=1" >&2
     return 1
   fi
@@ -436,17 +436,157 @@ check_nature_guard() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────
-# PR-merged guard — Done requires the PR to be merged
+# Hierarchy guards — parent completion and bundled-child provenance
 # ───────────────────────────────────────────────────────────────────────────
 #
-# A ticket cannot transition to Done while its PR is still open. Done means
-# "shipped to <workingBranch>"; an open PR means develop doesn't have the
-# commits yet, so moving to Done would create an inconsistent state. The PR
-# merge event is what should trigger Done — not reviewer approval.
+# A parent can only be Done after every native child is Done on the configured
+# project board. The adapter returns non-Done (including unverifiable) children.
+# A bundled-PR ticket can skip its own PR only if GitHub verifies its native
+# parent relation. Both adapter calls return structured JSON and fail closed.
+
+check_incomplete_children_guard() {
+  local ticket=$1 target=$2 payload count children
+  [[ "${SF_WORKFLOW_BYPASS_CHILDREN_GUARD:-}" == "1" ]] && return 0
+  is_done_target "$target" || return 0
+
+  payload=$(route_to_tool "$WORKFLOW_TOOL" list-incomplete-children "$ticket" 2>/dev/null) || {
+    echo "Error: unable to verify child issue statuses; no status transition was made." >&2
+    return 1
+  }
+  children=$(printf '%s' "$payload" | jq -ce 'if type == "array" then . else error("Expected child issue array") end') || {
+    echo "Error: invalid child-status response; no status transition was made." >&2
+    return 1
+  }
+  count=$(printf '%s' "$children" | jq 'length')
+  [[ "$count" -eq 0 ]] && return 0
+
+  echo -e "${RED}✗ Ticket #${ticket} has ${count} native child issue(s) not verified Done — cannot transition to 'Done'.${NC}" >&2
+  printf '%s' "$children" | jq -r '.[] | "  #\(.number) \(.title // "untitled"): \(.status // "status unavailable")"' >&2
+  echo "  Move every child to Done on the project board before completing its parent." >&2
+  echo "  Escape hatch (rare): SF_WORKFLOW_BYPASS_CHILDREN_GUARD=1" >&2
+  return 1
+}
+
+get_native_parent_number() {
+  local ticket=$1 parent
+  parent=$(route_to_tool "$WORKFLOW_TOOL" get-parent "$ticket" 2>/dev/null) || return 1
+  printf '%s' "$parent" | jq -er 'if type == "object" and (.number | type == "number") then .number else error("Expected parent issue") end'
+}
+
+get_ticket_issue_type() {
+  local ticket=$1 issue_type
+  issue_type=$(route_to_tool "$WORKFLOW_TOOL" get-issue-type "$ticket" 2>/dev/null) || return 1
+  printf '%s' "$issue_type" | jq -er 'if type == "object" and (.name | type == "string") then .name else error("Expected issue type") end'
+}
+
+check_epic_derived_status_guard() {
+  local ticket=$1 target=$2 normalized issue_type
+  normalized=$(echo "$target" | tr '[:upper:]' '[:lower:]' | awk '{$1=$1;print}')
+  case "$normalized" in
+    "ai testing"|"human testing"|"in review") ;;
+    *) return 0 ;;
+  esac
+
+  # A failed type lookup must not block ordinary tickets. It also cannot grant
+  # the Epic exception: only a positively verified sf-epic enters this branch.
+  issue_type=$(get_ticket_issue_type "$ticket" 2>/dev/null || true)
+  [[ "$issue_type" == "sf-epic" ]] || return 0
+
+  echo "Error: aggregate Epic #${ticket} cannot enter '${target}'." >&2
+  echo "  An Epic stays In progress while its children are delivered, then rolls to Done" >&2
+  echo "  only after every native child has project-board Status Done." >&2
+  return 1
+}
+
+check_bundled_pr_parent_guard() {
+  local ticket=$1 target=$2 nature parent_number parent_type
+  [[ "${SF_WORKFLOW_BYPASS_BUNDLED_PARENT_GUARD:-}" == "1" ]] && return 0
+  is_done_target "$target" || return 0
+
+  nature=$(get_ticket_nature_label "$ticket") || {
+    echo "Error: unable to verify ticket nature for bundled-PR transition." >&2
+    return 1
+  }
+  [[ "$nature" == "bundled-pr" ]] || return 0
+
+  parent_number=$(get_native_parent_number "$ticket") || {
+    echo "Error: unable to verify that bundled-PR ticket #${ticket} is a native child issue." >&2
+    return 1
+  }
+  parent_type=$(get_ticket_issue_type "$parent_number") || {
+    echo "Error: unable to verify native parent #${parent_number} for bundled-PR ticket #${ticket}." >&2
+    return 1
+  }
+  if [[ "$parent_type" == "sf-epic" ]]; then
+    echo "Error: bundled-PR ticket #${ticket} cannot use an aggregate sf-epic as its delivery parent." >&2
+    return 1
+  fi
+  return 0
+}
+
+rollup_parent_status() {
+  # The child transition already succeeded. A rollup failure is reported, never
+  # undone locally; GitHub remains the authoritative source and a later child
+  # transition can retry it.
+  local child=$1 target=$2 normalized parent parent_type parent_status pending
+  normalized=$(echo "$target" | tr '[:upper:]' '[:lower:]' | awk '{$1=$1;print}')
+  [[ "$normalized" == "in progress" || "$normalized" == "done" ]] || return 0
+
+  parent=$(get_native_parent_number "$child") || return 0
+  parent_type=$(get_ticket_issue_type "$parent") || {
+    echo "Warning: child #${child} moved, but parent #${parent} type could not be verified for rollup." >&2
+    return 0
+  }
+  [[ "$parent_type" == "sf-epic" ]] || return 0
+
+  if [[ "$normalized" == "in progress" ]]; then
+    parent_status=$(get_current_status "$parent" 2>/dev/null) || {
+      echo "Warning: child #${child} moved, but parent #${parent} status could not be read for rollup." >&2
+      return 0
+    }
+    case "$(echo "$parent_status" | tr '[:upper:]' '[:lower:]' | awk '{$1=$1;print}')" in
+      backlog)
+        route_to_tool "$WORKFLOW_TOOL" update-status "$parent" "Ready" || {
+          echo "Warning: could not roll parent Epic #${parent} from Backlog to Ready." >&2; return 0;
+        }
+        echo "Derived rollup: Epic #${parent} → Ready (child #${child} entered In progress)."
+        route_to_tool "$WORKFLOW_TOOL" update-status "$parent" "In progress" || {
+          echo "Warning: could not roll parent Epic #${parent} to In progress." >&2; return 0;
+        }
+        echo "Derived rollup: Epic #${parent} → In progress (child #${child} entered In progress)."
+        ;;
+      ready)
+        route_to_tool "$WORKFLOW_TOOL" update-status "$parent" "In progress" || {
+          echo "Warning: could not roll parent Epic #${parent} to In progress." >&2; return 0;
+        }
+        echo "Derived rollup: Epic #${parent} → In progress (child #${child} entered In progress)."
+        ;;
+      *) return 0 ;;
+    esac
+    return 0
+  fi
+
+  pending=$(route_to_tool "$WORKFLOW_TOOL" list-incomplete-children "$parent" 2>/dev/null) || {
+    echo "Warning: child #${child} moved, but parent Epic #${parent} could not be checked for Done rollup." >&2
+    return 0
+  }
+  if ! printf '%s' "$pending" | jq -e 'type == "array" and length == 0' >/dev/null 2>&1; then
+    return 0
+  fi
+  route_to_tool "$WORKFLOW_TOOL" update-status "$parent" "Done" || {
+    echo "Warning: all children are Done, but parent Epic #${parent} could not be rolled up to Done." >&2
+    return 0
+  }
+  echo "Derived rollup: Epic #${parent} → Done (all native children are Done)."
+}
+
+# ───────────────────────────────────────────────────────────────────────────
+# PR-merged guard — normal Done requires a verified merged PR
+# ───────────────────────────────────────────────────────────────────────────
 #
-# Tickets without any PR (Epic groupers, doc-only chores) are allowed through.
-# Fail-open on `gh` fetch errors (offline / auth). Escape hatch:
-# SF_WORKFLOW_BYPASS_PR_MERGED_GUARD=1.
+# A normal ticket needs a matching PR merged into the configured working branch
+# before it becomes Done. An absent PR is not evidence of a merge. The only
+# exception is a verified native child carrying nature:bundled-pr.
 
 is_done_target() {
   local target=$1
@@ -471,10 +611,28 @@ get_open_pr_for_ticket() {
   # Returns 0 on clean fetch (even when no PR exists), 1 on fetch error.
   local ticket=$1
   local payload
-  payload=$(gh pr list --state open --json number,headRefName 2>/dev/null) || return 1
+  payload=$(gh pr list --state open --limit 1000 --json number,headRefName 2>/dev/null) || return 1
   echo "$payload" | jq -r --arg t "$ticket" '
-    .[] | select(.headRefName | test("^(feature|fix)/" + $t + "(-|$)")) | .number
-  ' | head -n1
+    if type == "array" then
+      [.[] | select(.headRefName | type == "string" and test("^(feature|fix)/" + $t + "(-|$)")) | .number] | .[0] // empty
+    else error("Expected PR array") end
+  '
+}
+
+get_merged_pr_for_ticket() {
+  # Prints the first matching PR confirmed merged into the configured working
+  # branch. Returns 1 for request or malformed-response failures.
+  local ticket=$1 payload
+  payload=$(gh pr list --state merged --limit 1000 --json number,headRefName,baseRefName,mergedAt 2>/dev/null) || return 1
+  echo "$payload" | jq -r --arg t "$ticket" --arg base "$WORKING_BRANCH" '
+    if type == "array" then
+      [.[]
+       | select(.headRefName | type == "string" and test("^(feature|fix)/" + $t + "(-|$)"))
+       | select(.baseRefName == $base)
+       | select(.mergedAt | type == "string" and length > 0)
+       | .number] | .[0] // empty
+    else error("Expected PR array") end
+  '
 }
 
 check_pr_merged_guard() {
@@ -485,8 +643,32 @@ check_pr_merged_guard() {
   [[ "${SF_WORKFLOW_BYPASS_PR_MERGED_GUARD:-}" == "1" ]] && return 0
   is_done_target "$target" || return 0
 
+  # SRS drafting tickets use their dedicated drafting lifecycle and produce
+  # specifications rather than a delivery branch or PR.
+  local srs_label
+  srs_label=$(get_ticket_srs_label "$ticket" 2>/dev/null || true)
+  [[ -n "$srs_label" ]] && return 0
+
+  local nature
+  nature=$(get_ticket_nature_label "$ticket") || {
+    echo "Error: unable to verify ticket nature before Done transition." >&2
+    return 1
+  }
+  [[ "$nature" == "bundled-pr" ]] && return 0
+
+  local issue_type
+  # A missing/unavailable type is treated as a normal delivery ticket, which
+  # still needs a merged PR. Only a positively verified sf-epic is exempt.
+  issue_type=$(get_ticket_issue_type "$ticket" 2>/dev/null || true)
+  # Parent completion is guarded separately by check_incomplete_children_guard.
+  # An aggregate Epic has no delivery branch or PR of its own.
+  [[ "$issue_type" == "sf-epic" ]] && return 0
+
   local pr_number
-  pr_number=$(get_open_pr_for_ticket "$ticket") || return 0   # fail-open on fetch error
+  pr_number=$(get_open_pr_for_ticket "$ticket") || {
+    echo "Error: unable to verify open PR state; no status transition was made." >&2
+    return 1
+  }
 
   if [[ -n "$pr_number" ]]; then
     echo -e "${RED}✗ Ticket #${ticket} has an open PR (#${pr_number}) — cannot transition to 'Done'.${NC}" >&2
@@ -500,14 +682,26 @@ check_pr_merged_guard() {
     echo "  Escape hatch (rare): SF_WORKFLOW_BYPASS_PR_MERGED_GUARD=1" >&2
     return 1
   fi
+
+  local merged_pr
+  merged_pr=$(get_merged_pr_for_ticket "$ticket") || {
+    echo "Error: unable to verify merged PR state; no status transition was made." >&2
+    return 1
+  }
+  if [[ -z "$merged_pr" ]]; then
+    echo -e "${RED}✗ Ticket #${ticket} has no verified merged PR into '${WORKING_BRANCH}' — cannot transition to 'Done'.${NC}" >&2
+    echo "  Open and merge the ticket PR before marking the ticket Done." >&2
+    echo "  Escape hatch (rare): SF_WORKFLOW_BYPASS_PR_MERGED_GUARD=1" >&2
+    return 1
+  fi
   return 0
 }
 
 # ───────────────────────────────────────────────────────────────────────────
 # PR-state guard — Human Testing requires draft; In Review requires ready.
-# Unknown, malformed or ambiguous remote state fails closed. PR-less Epic
-# groupers are exempt; delivery Epics carrying a PR follow its draft state.
-# Escape hatch: SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD=1.
+# Unknown, malformed or ambiguous remote state fails closed. Aggregate Epics
+# are rejected earlier by check_epic_derived_status_guard and never reach this
+# PR lifecycle. Escape hatch: SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD=1.
 
 check_pr_existence_guard() {
   local ticket=$1 target=$2 normalized
@@ -541,13 +735,6 @@ check_pr_existence_guard() {
   }
   count=$(echo "$matches" | jq length)
   if [[ "$count" -eq 0 ]]; then
-    # Derived Epic groupers do not own PRs. Delivery Epics with a PR still
-    # follow the same draft/readiness contract as Stories.
-    local issue_type
-    issue_type=$(gh api graphql -F owner='{owner}' -F name='{repo}' -F number="$ticket" \
-      -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){issueType{name}}}}' 2>/dev/null \
-      | jq -er '.data.repository.issue.issueType.name // empty') || issue_type=""
-    [[ "$issue_type" == "sf-epic" ]] && return 0
     echo "✗ Ticket #${ticket} has no open PR — cannot transition to '$(if [[ "$normalized" == 'in review' ]]; then echo 'In Review'; else echo 'Human Testing'; fi)'." >&2
     echo "  Open a draft with workflow-cli.sh create-pr ${ticket} --draft for Human Testing." >&2
     echo "  After approval, use workflow-cli.sh ready-pr ${ticket} before In Review." >&2
@@ -613,7 +800,7 @@ show_next_status() {
     local nature
     nature=$(get_ticket_nature_label "$ticket" 2>/dev/null || true)
     if [[ "$nature" == "bundled-pr" ]]; then
-      echo "Next: Done (nature:bundled-pr — no individual PR, merge happens at the parent Epic)"
+      echo "Next: Done (nature:bundled-pr — no individual PR, merge happens at the delivery parent)"
       return
     fi
     if [[ "$(status_slug "$next")" == "human-testing" && "$nature" == "internal" ]]; then
@@ -872,7 +1059,16 @@ case "$COMMAND" in
     if ! check_complexity_guard "$TICKET" "$TARGET"; then
       exit 2
     fi
+    if ! check_epic_derived_status_guard "$TICKET" "$TARGET"; then
+      exit 2
+    fi
     if ! check_nature_guard "$TICKET" "$TARGET"; then
+      exit 2
+    fi
+    if ! check_incomplete_children_guard "$TICKET" "$TARGET"; then
+      exit 2
+    fi
+    if ! check_bundled_pr_parent_guard "$TICKET" "$TARGET"; then
       exit 2
     fi
     if ! check_pr_existence_guard "$TICKET" "$TARGET"; then
@@ -882,6 +1078,7 @@ case "$COMMAND" in
       exit 2
     fi
     route_to_tool "$WORKFLOW_TOOL" update-status "$@" || exit $?
+    rollup_parent_status "$TICKET" "$TARGET"
     print_status_banner "$TARGET"
 
     # Where the release now stands.
@@ -1002,7 +1199,18 @@ case "$COMMAND" in
     route_to_tool "$WORKFLOW_TOOL" milestone "$SUB" "$@"
     ;;
 
-  create-subtask|create-epic|create-pr|ready-pr|draft-pr|list|get-labels)
+  create-pr|ready-pr|draft-pr)
+    load_config
+    TICKET=$1
+    ISSUE_TYPE=$(get_ticket_issue_type "$TICKET" 2>/dev/null || true)
+    if [[ "$ISSUE_TYPE" == "sf-epic" ]]; then
+      echo "Error: aggregate Epic #${TICKET} owns no branch or pull request; deliver work through its child tickets." >&2
+      exit 2
+    fi
+    route_to_tool "$WORKFLOW_TOOL" "$COMMAND" "$@"
+    ;;
+
+  create-subtask|create-epic|list|get-labels)
     load_config
     route_to_tool "$WORKFLOW_TOOL" "$COMMAND" "$@"
     ;;

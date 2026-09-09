@@ -26,51 +26,65 @@ Orthogonal to complexity. Controls whether **Human Testing** and **In Review** a
 | --- | --- | --- |
 | `nature:user-facing` | Bug fix or feature with visible UX impact — anything a user can click, see, or feel | Mandatory `AI Testing → Human Testing → In Review → Done` |
 | `nature:internal` | Refactor, scaffolding, internal tooling, doc-only change — ships its own PR | Optional `AI Testing → In Review → Done` (skip Human Testing) |
-| `nature:bundled-pr` | Sub-Story of a multi-step Epic whose merge happens via the **Epic's single bundled PR** — there is no individual PR to open at this Sub's level | `AI Testing → Done` (skip Human Testing **and** In Review — PR is at the parent Epic) |
+| `nature:bundled-pr` | Child ticket under a delivery parent whose one atomic commit lands on the **parent's branch** — there is no individual child PR | `AI Testing → Done` (skip Human Testing **and** In Review — PR is at the delivery parent) |
 
 **Default** — if a ticket has no `nature:*` label, the workflow treats it as `user-facing` (safe default).
 
-**Why this exists** — Human Testing is theatrical on tickets with no user-visible surface (the existing tests + lint + typecheck already cover the integration risk). And `In Review` on a Sub whose PR is bundled at the parent Epic is a board lie: there is no PR to review at this Sub level — the merge happens once at the end of the Epic. For those Subs we go AI Testing → Done directly, and the Epic's own ticket carries the In Review / merge ceremony.
+**Why this exists** — Human Testing is theatrical on tickets with no user-visible surface (the existing tests + lint + typecheck already cover the integration risk). And `In Review` on a bundled child is a board lie: there is no PR to review at child level — the delivery parent's PR carries the merge ceremony. Bundled children go AI Testing → Done directly.
 
-**Epic-level Human Testing** — when an Epic is composed entirely of `nature:internal` (or `nature:bundled-pr`) children, the meaningful manual validation happens at **Epic completion** (e.g. an integration test on the freshly merged target branch), not on each child. Tag the Epic itself `nature:user-facing` so its own AI Testing → In Review transition still requires that integration check.
+**Delivery-parent Human Testing** — when a delivery parent contains `nature:bundled-pr` children, the meaningful manual validation happens on the delivery parent's PR after all children are validated. An Epic only groups delivery parents and never owns this PR.
 
 **Guards** (all enforced by `update-status`):
 
 - **Nature guard** on `→ In Review` from `AI Testing` — requires `nature:internal`. `nature:bundled-pr` is rejected here (must go to `Done` instead). Default (no label / `user-facing`) must go through Human Testing first. Escape hatch: `SF_WORKFLOW_BYPASS_NATURE_GUARD=1`.
 - **PR-state guard** — `→ Human Testing` requires an open draft PR; `→ In Review` requires an open non-draft PR. Unknown PR state blocks these transitions. Epic groupers without a PR keep their derived lifecycle. Escape hatch: `SF_WORKFLOW_BYPASS_PR_EXISTENCE_GUARD=1`.
 - **Nature guard** on `→ Done` from `AI Testing` — allowed **only** for `nature:bundled-pr` (everyone else must go through `In Review` first). Escape hatch: `SF_WORKFLOW_BYPASS_NATURE_GUARD=1`.
-- **PR-merged guard** on `→ Done` — rejected when an open PR still exists for the ticket (`Done` means merged). Does not fire on `nature:bundled-pr` (no PR is expected). Escape hatch: `SF_WORKFLOW_BYPASS_PR_MERGED_GUARD=1`.
+- **PR-merged guard** on `→ Done` — normal delivery tickets require a matching PR verified merged into the working branch. Aggregate Epics and verified `nature:bundled-pr` children are exempt because they own no PR. Escape hatch: `SF_WORKFLOW_BYPASS_PR_MERGED_GUARD=1`.
 
-## 🧩 Ticket Hierarchy (Epic / Story-Task / Subtask)
+## 🧩 Ticket Hierarchy (Epic / Delivery parent / Child ticket)
 
-{{WORKFLOW_NAME}} uses a **three-level ticket hierarchy** — Epics produce **no PR**, Subtasks are **not {{TOOL}} issues**.
+{{WORKFLOW_NAME}} distinguishes an optional grouping Epic from a delivery parent. Every child created by
+`create-subtask` is a **native {{TOOL}} sub-issue**. A child is either a normal child with its own branch and PR,
+or a bundled child whose single atomic commit lands on its delivery parent's branch.
 
 ```
-(Epic)          optional grouper
- └─ Story|Task  mandatory — branch + PR + full workflow
-     └─ Subtask optional — commit on the Story/Task branch
+(Epic)                 optional grouper — no branch or PR
+ └─ Story|Task|Issue   delivery parent — owns a branch and PR
+     └─ Child ticket   native sub-issue: own branch/PR, or bundled commit on parent branch
 ```
 
 | Level | Role | Deliverable | Tracking artifact | Status |
 | --- | --- | --- | --- | --- |
-| **Epic** | Grouper for related Stories/Tasks (SRS feature, bug batch, transverse refactor) | **None directly** — no branch, no commit, no PR | Ticket, labeled `type: epic`, with child Story/Task tickets linked as sub-issues | **Derived from children** (see rule below) |
+| **Epic** | Optional grouper for related delivery parents (SRS feature, bug batch, transverse refactor) | **None directly** — no branch, no commit, no PR | Ticket with native issue type `sf-epic` and delivery-parent tickets linked as sub-issues | **Derived from children** (see rule below) |
 | **Story** | Delivers user-observable value | Branch + commits + PR | Regular ticket, `story.tpl.ts` body — Acceptance Criteria section | Explicit, full workflow lifecycle |
 | **Task** | Delivers a technical action | Branch + commits + PR | Regular ticket, `task.tpl.ts` body — Completion Criteria section | Explicit, full workflow lifecycle |
 | **Issue (bug)** | Task variant for defects | Branch + commits + PR | Regular ticket, `issue.tpl.ts` body — Behavior/Expected/Repro/Environment/Impact/Evidence | Explicit, full workflow lifecycle |
-| **Subtask** | Step in the action plan of a Story/Task | A single commit (atomically revertible) | **Never** a ticket, **never** a branch, **never** a PR | — (commit lands on parent branch) |
+| **Child ticket** | Deliverable under a delivery parent | Normal child: branch + PR. Bundled child: one atomic commit on the parent's branch | Native {{TOOL}} sub-issue created by `create-subtask` | Normal child follows the full lifecycle; `nature:bundled-pr` may go AI Testing → Done |
 
-**⚠️ Naming warning** — the `create-subtask` CLI misnames its output: it creates **Story tickets**, not true Subtasks. True Subtasks are commits and are not tracked on the board.
+**Child execution modes** — use a normal child when the work needs independent review, a branch, or a PR. Use
+`nature:bundled-pr` only for one atomic, tightly coupled commit on the delivery parent's branch; it has no child PR
+and may move from AI Testing directly to Done after validation. “Subtask” is shorthand for this native child ticket,
+not a commit-only concept.
 
-### Epic status derivation rule
+An Epic remains an aggregate grouping ticket spanning one or more milestones. Its status is derived: the first child
+entering `In progress` brings the Epic to `In progress`, and the last child reaching `Done` brings the Epic to `Done`.
+It does not become a delivery parent or open a bundled PR. If several child
+deliverables must ship in one PR, make their immediate parent a Story, Task, or Issue with its own branch and PR;
+the Epic only groups that delivery parent.
 
-An Epic's board status is **computed from its children**, never set directly.
+### Epic status roll-up
 
-| Direction | Rule | Intuition |
-| --- | --- | --- |
-| **Ascent** (Backlog → … → In progress) | Epic = **earliest** status among children | As soon as one child advances, the Epic moves with it |
-| **Descent** (In progress → … → Done) | Epic = **latest** status among children | The Epic reaches a later stage only when **all** children have reached it |
+An Epic is an aggregate with two derived transitions:
 
-**Consequence** — an Epic at `Done` is a strong contract: every child is merged. Example: children at `{In progress, Ready, Backlog}` ⇒ Epic = `Ready` (earliest). Children at `{Done, In review, In review}` ⇒ Epic = `In review` (latest).
+| Child event | Epic transition |
+| --- | --- |
+| The first native child enters `In progress` | `Backlog → Ready → In progress`, or `Ready → In progress` |
+| The last incomplete native child enters `Done` | `In progress → Done` |
+
+The Epic stays `In progress` while its children pass through testing and review. It never owns a branch or PR and may
+span multiple milestones; its delivery children carry their own milestone assignments. The parent Done guard checks
+every native child's project-board Status. Backlog, Ready, In progress, AI Testing, Human Testing, In Review, or an
+unknown status blocks Done. Incomplete children do not block the parent's testing or review phases.
 
 ## How to use this skill
 
@@ -252,8 +266,8 @@ The listener executes only trusted default-branch code, never PR code. Commit it
 2. **NEVER skip steps** described in a status
 3. **NEVER move to the next status** without meeting all exit conditions
 4. **ASK if uncertain** - don't assume or guess
-5. **CLOSE CHILD TICKETS AS THEY LAND** — after a child Story/Task/Issue's final commit is merged, immediately run `workflow-cli.sh update-status <child> Done` and verify `gh issue view <child> --json state` prints `CLOSED` before starting the next sibling. Never batch closures at the end of an Epic. (A true Subtask is a commit, not a {{TOOL}} issue — there is no status to close.)
-6. **EPIC STATUS FOLLOWS CHILDREN** — an Epic's board status is derived from its children (earliest for ascent Backlog→In progress, latest for descent In progress→Done — see "Epic status derivation rule" above). Before advancing an Epic, run `gh issue list --state open --search "parent #<N>"` and confirm the target status is consistent with all children. An Epic can only reach `Done` when every child is `Done`.
+5. **CLOSE CHILD TICKETS AS THEY LAND** — every child is a native {{TOOL}} sub-issue. A normal child reaches `Done` only after its own PR is verified merged; a bundled child reaches `Done` after its atomic commit is validated on the delivery parent's branch. Close each child immediately and verify `gh issue view <child> --json state` prints `CLOSED` before starting the next sibling. Never batch closures.
+6. **PARENT DONE IS GATED BY CHILDREN** — a delivery parent or Epic cannot enter `Done` until every native child ticket's project-board Status is exactly `Done`. Run `github-projects-cli.sh list-incomplete-children <N>`; any returned or unverifiable child blocks the transition. An Epic moves to In progress with its first active child and to Done with its last completed child.
 7. **FINISH THE CURRENT TICKET BEFORE STARTING ANOTHER** — if a ticket sits in any status between `In Progress` and `Done` (see the Workflow Statuses section above), drive it to `Done` before claiming or starting another. The only override is an explicit developer request to pause.
 8. **TICKETS FROM SRS** — when `tools.srs.backend` is set in `.saasfoundry.json`, Story sub-tickets under an SRS Epic must be spawned from the canonical FR pages, not hand-written. Use `.claude/skills/sf-srs/scripts/srs-cli.sh spawn --ticket <parent> --epic <page-url-or-id>` to create one child issue per FR page, each body rendered from `renderStoryTicketBody`. The `create-subtask` command rejects any call without `--bypass-srs <reason>` on SRS-enabled projects — see the "SRS Handoff" section above. The escape hatch exists for meta tickets (SRS refactors, tooling) but must never be used to duplicate an FR that already has a page.
 
