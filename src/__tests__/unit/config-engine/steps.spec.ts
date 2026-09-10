@@ -43,7 +43,21 @@ describe('configSteps registry', () => {
   })
 
   it('keeps the batch order of sf new (profile first; tools-first ahead of workflow/skills/srs)', () => {
-    expect(configSteps.map((s) => s.id)).toEqual(['profile', 'project', 'harness-project', 'email-credentials', 'storage', 'analytics', 'pwa', 'tools', 'workflow', 'language', 'skills', 'srs'])
+    expect(configSteps.map((s) => s.id)).toEqual([
+      'profile',
+      'agents',
+      'project',
+      'harness-project',
+      'email-credentials',
+      'storage',
+      'analytics',
+      'pwa',
+      'tools',
+      'workflow',
+      'language',
+      'skills',
+      'srs'
+    ])
   })
 
   it('declares effects on every step wrapping an external side effect', () => {

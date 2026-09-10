@@ -20,6 +20,8 @@ export interface S3Credentials {
 
 export interface Answers {
   profile?: 'full' | 'harness' | 'stack'
+  /** Coding-agent hosts to configure in the generated harness. */
+  agents?: HarnessAgent[]
   projectName: string
   projectDescription: string
   isMonorepo: boolean
@@ -343,7 +345,7 @@ export interface SaaSFoundryManifest {
     // `sf update` can refresh them and module migrations can target them.
     harness?: {
       version: number
-      /** Additive shared support; absence preserves legacy behavior. */
+      /** Exact shared coding-agent declaration; absence preserves legacy Claude behavior. */
       agents?: HarnessAgent[]
     }
     // PWA module — makes the generated web app installable as a desktop

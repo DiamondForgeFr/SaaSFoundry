@@ -15,6 +15,7 @@ import { computeHarnessFileHashes, harnessInstallerMeta, installHarness } from '
 import { ensureWorkflowLabels, ensureWorkingBranch, resolveRepoSlug } from '../installers/harness-provisioning'
 import { pwaInstallerMeta } from '../installers/pwa.installer'
 import { installSkills } from '../installers/skills.installer'
+import { installSelectedAgentInstructions, writeMultirepoAgentManifests } from '../installers/agent-topology'
 import { installSrsSkill } from '../installers/srs-skill.installer'
 import { initAndStartDb } from '../runners/database.runner'
 import { initAndStartS3 } from '../runners/s3.runner'
@@ -26,6 +27,7 @@ import { targetManifestVersion } from '../migrations/manifest/registry'
 import { resolvePorts } from '../ports'
 import { NotionSrsAdapter } from '../tools/notion/srs.adapter'
 import { Answers, manifestSchemaUrl, SaaSFoundryManifest, SrsToolConfig } from '../types'
+import type { HarnessAgent } from '../harness/agent-registry'
 import { upsertEnvKey } from '../utils/env-file'
 import { ensureGitignorePatterns } from '../utils/gitignore'
 import { checkNodeVersion, computeFileHashes, fileExists, setDefaultDbCredentials } from '../utils'
@@ -47,6 +49,10 @@ export async function newCommand(opts: NewCommandOptions = {}) {
   // Chat with user — collection runs through the config-engine session;
   // everything below this line is pure execution on the validated config.
   const { config: startProjectAnswers } = await runConfigSession({ renderer: inquirerRenderer, prefill, nonInteractive })
+  // A scripted caller that omits --agents retains the historical implicit
+  // Claude-only declaration. Interactive users reviewed the checkbox choice,
+  // so their selection is explicit and belongs in the manifest.
+  if (nonInteractive && opts.agents === undefined) startProjectAnswers.agents = undefined
 
   // Harness profile: install the AI harness onto the existing repository and
   // stop — no scaffold, no project directory, no post-setup services.
@@ -281,7 +287,16 @@ export async function newCommand(opts: NewCommandOptions = {}) {
       fileHashes,
       tools: buildManifestTools(srsTools, startProjectAnswers)
     }
+    const selectedAgents = (startProjectAnswers as Answers & { agents?: HarnessAgent[] }).agents
+    if (selectedAgents?.length) {
+      manifest.modules = {
+        ...manifest.modules,
+        harness: { ...manifest.modules?.harness, version: manifest.modules?.harness?.version ?? harnessInstallerMeta.currentVersion, agents: selectedAgents }
+      }
+    }
     await writeFile('.saasfoundry.json', JSON.stringify(manifest, null, 2))
+    await writeMultirepoAgentManifests(manifest, startProjectAnswers.projectName)
+    await installSelectedAgentInstructions(manifest, startProjectAnswers.projectName, selectedAgents)
 
     spinner.succeed(chalk.green('Project setup completed successfully'))
   } catch (error) {
@@ -702,9 +717,9 @@ async function bootstrapSrsWorkspace(startProjectAnswers: Answers, onProgress: (
 
 /**
  * Harness-profile execution: deposit the AI harness onto the existing
- * repository (cwd) and write a minimal manifest — structure 'cli', no
- * modules block, no fileHashes (both are scaffold concerns; their absence is
- * what tells `sf update` to skip template regeneration).
+ * repository (cwd) and write a minimal `cli` manifest. Harness-only manifests
+ * retain deposit baselines but omit scaffold module markers, so `sf update`
+ * refreshes the harness without attempting stack regeneration.
  */
 async function runHarnessInstall(config: Answers): Promise<void> {
   if (await fileExists('.saasfoundry.json')) {
@@ -718,13 +733,14 @@ async function runHarnessInstall(config: Answers): Promise<void> {
 
   try {
     spinner.text = 'Installing skills and workflow artefacts...'
-    await installHarness({
+    const agentReport = await installHarness({
       targetPath: '.',
       projectName: config.projectName,
       version: cliVersion,
       mainBranch: config.mainBranch,
       workflow: config.workflow,
-      advancedSkills: config.advancedSkills
+      advancedSkills: config.advancedSkills,
+      agents: config.agents
     })
 
     const srsTools = await bootstrapSrsWorkspace(config, (text) => {
@@ -742,9 +758,15 @@ async function runHarnessInstall(config: Answers): Promise<void> {
       mainBranch: config.mainBranch,
       // Harness deposits are versioned + hash-tracked (scoped to .claude/skills
       // and .claude/docs) so `sf update` can refresh them conflict-aware.
-      modules: { harness: { version: harnessInstallerMeta.currentVersion }, advancedSkills: config.advancedSkills ?? [] },
+      modules: {
+        harness: {
+          version: harnessInstallerMeta.currentVersion,
+          ...(config.agents?.length ? { agents: config.agents } : {})
+        },
+        advancedSkills: config.advancedSkills ?? []
+      },
       language: languageConfigFromAnswers(config),
-      fileHashes: await computeHarnessFileHashes('.'),
+      fileHashes: { ...(await computeHarnessFileHashes('.')), ...(agentReport?.fileHashes ?? {}) },
       workflow: config.workflow,
       aiRules: config.aiRules,
       tools: buildManifestTools(srsTools, config)

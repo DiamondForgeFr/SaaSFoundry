@@ -27,6 +27,7 @@ program
   .option('--non-interactive', 'Fail if any required value is missing instead of prompting')
   // Intent profile
   .option('--profile <profile>', 'What to install: full (stack + AI harness, default), harness (AI workflow/skills/SRS on an existing project), or stack (technical base only)')
+  .option('--agents <agents>', 'Comma-separated coding-agent profiles to configure (for example: claude-code,codex)')
   // Project basics
   .option('--project-name <name>', 'Project name (kebab-case)')
   .option('--project-description <description>', 'Project description')

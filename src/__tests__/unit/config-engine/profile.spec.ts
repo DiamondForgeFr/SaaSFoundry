@@ -38,6 +38,7 @@ describe('profile gating across steps', () => {
   it('full keeps every step', () => {
     expect(applicable({ profile: 'full', emailService: 'mailersend' })).toEqual([
       'profile',
+      'agents',
       'project',
       'email-credentials',
       'storage',
@@ -52,7 +53,7 @@ describe('profile gating across steps', () => {
   })
 
   it('harness skips the stack steps and swaps in the detection step (emailService is never collected)', () => {
-    expect(applicable({ profile: 'harness' })).toEqual(['profile', 'harness-project', 'tools', 'workflow', 'language', 'skills', 'srs'])
+    expect(applicable({ profile: 'harness' })).toEqual(['profile', 'agents', 'harness-project', 'tools', 'workflow', 'language', 'skills', 'srs'])
   })
 
   it('stack skips the AI-harness steps', () => {

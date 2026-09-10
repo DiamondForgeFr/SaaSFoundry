@@ -242,10 +242,10 @@ describe('newCommand (non-interactive integration)', () => {
       })
     ).rejects.toThrow(/Missing required values in --non-interactive mode/)
 
-    // The profile step renders first with its non-interactive default (`full`)
-    // before the project step throws — the guarantee is that no prompt call
+    // The profile and agent steps render with non-interactive defaults before
+    // the project step throws — the guarantee is that no prompt call
     // ever ran without a complete prefill (i.e. the user was never asked).
-    expect(mockedPrompt.mock.calls.length).toBeLessThanOrEqual(1)
+    expect(mockedPrompt.mock.calls.length).toBeLessThanOrEqual(2)
     for (const call of mockedPrompt.mock.calls) {
       expect(call[1]).toMatchObject({ profile: 'full' })
     }

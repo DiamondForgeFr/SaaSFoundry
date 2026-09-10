@@ -1,11 +1,13 @@
 import { DEFAULT_OUTPUT_LANGUAGE } from '../language'
-import { Answers, DbCredentials, S3Credentials } from '../types'
+import { getAgentIds, isHarnessAgent } from '../harness/agent-registry'
+import { Answers, DbCredentials, HarnessAgent, S3Credentials } from '../types'
 
 export interface NewCommandOptions {
   nonInteractive?: boolean
 
   // Intent profile (what to install)
   profile?: 'full' | 'harness' | 'stack'
+  agents?: string
 
   // Project basics
   projectName?: string
@@ -104,6 +106,8 @@ export function buildPrefillFromOptions(opts: NewCommandOptions): Partial<Answer
   // existing flag-driven invocations keep today's behaviour without a new flag.
   if (opts.profile !== undefined) prefill.profile = opts.profile
   else if (opts.nonInteractive === true) prefill.profile = 'full'
+
+  if (opts.agents !== undefined) prefill.agents = parseAgentsOption(opts.agents)
 
   if (opts.projectName !== undefined) prefill.projectName = opts.projectName
   if (opts.projectDescription !== undefined) prefill.projectDescription = opts.projectDescription
@@ -209,6 +213,24 @@ export function buildPrefillFromOptions(opts: NewCommandOptions): Partial<Answer
   }
 
   return prefill
+}
+
+/** Parse the comma-separated --agents option against the versioned registry. */
+export function parseAgentsOption(value: string): HarnessAgent[] {
+  const agents = [
+    ...new Set(
+      value
+        .split(',')
+        .map((agent) => agent.trim())
+        .filter(Boolean)
+    )
+  ]
+  if (agents.length === 0) throw new Error('The --agents option requires at least one registered coding-agent profile.')
+  const unsupported = agents.filter((agent) => !isHarnessAgent(agent))
+  if (unsupported.length > 0) {
+    throw new Error(`Unknown coding agent '${unsupported[0]}'. Supported profiles: ${getAgentIds().join(', ')}. Model names and providers are separate.`)
+  }
+  return agents as HarnessAgent[]
 }
 
 /**

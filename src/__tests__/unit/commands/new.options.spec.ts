@@ -1,4 +1,4 @@
-import { buildPrefillFromOptions, shouldSkipWorkflow, NewCommandOptions } from '../../../commands/new.options'
+import { buildPrefillFromOptions, parseAgentsOption, shouldSkipWorkflow, NewCommandOptions } from '../../../commands/new.options'
 
 describe('buildPrefillFromOptions', () => {
   it('returns an empty prefill when no options are provided', () => {
@@ -17,6 +17,15 @@ describe('buildPrefillFromOptions', () => {
       projectDescription: 'Great app',
       mainBranch: 'main'
     })
+  })
+
+  it('parses --agents as a trimmed, deduplicated registry selection', () => {
+    expect(buildPrefillFromOptions({ agents: 'claude-code, codex, claude-code' }).agents).toEqual(['claude-code', 'codex'])
+  })
+
+  it('rejects empty and unknown --agents values', () => {
+    expect(() => parseAgentsOption(' , ')).toThrow('requires at least one')
+    expect(() => parseAgentsOption('claude-code,sonnet')).toThrow('Unknown coding agent')
   })
 
   it('converts --structure monorepo to isMonorepo=true', () => {
