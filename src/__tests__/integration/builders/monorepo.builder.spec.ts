@@ -63,6 +63,18 @@ describe('createMonorepoRoot (integration)', () => {
     expect(pkg.name).toBe('my-saas')
   })
 
+  it('declares every dependency required by the shared root ESLint config', async () => {
+    await createMonorepoRoot(monorepoRootParams())
+
+    const pkg = JSON.parse(await readFile(join(tempDir, 'package.json'), 'utf8'))
+    expect(pkg.devDependencies).toMatchObject({
+      eslint: '10.3.0',
+      'eslint-plugin-prettier': '5.5.5',
+      globals: '17.6.0',
+      'typescript-eslint': '8.59.1'
+    })
+  })
+
   // Non-regression: `packageManager` must come from the template, never from the generating
   // machine. It used to be stamped with the host's `npm --version`, so a Docker image (or any
   // contributor) running npm 10.x baked a broken npm into every generated monorepo — the whole

@@ -87,6 +87,8 @@ export class EmailService {
       const invitationUrl = `${this.envConfig.get('FRONTEND_URL')}/user-invitation?invitationToken=${invitationToken}`
       const html = getInvitationHtmlTemplate(invitationUrl, this.translationService, locale, inviterName, inviteeName)
       const text = getInvitationTextTemplate(invitationUrl, this.translationService, locale, inviterName, inviteeName)
+      void html
+      void text
 
       // await this.sendEmail({
       //   to: email,

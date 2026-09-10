@@ -47,6 +47,8 @@ describe('installEmailModule (integration)', () => {
     })
 
     await expectNoTodoMarkers(join(apiPath, 'src/modules/auth/services/auth.service.ts'), 'mailer-service-active')
+    const content = await readFile(join(apiPath, 'src/modules/auth/services/auth.service.ts'), 'utf8')
+    expect(content).toContain('const { locale } = signUpDto')
   })
 
   it('should uncomment mailer-service-active markers in invitation.service.ts', async () => {
