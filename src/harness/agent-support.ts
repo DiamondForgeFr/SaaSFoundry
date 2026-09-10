@@ -43,9 +43,13 @@ export interface AgentSupportResult {
   fingerprint?: string
 }
 
+export type AgentSelectionMode = 'add' | 'replace'
+
 interface SupportParams {
   targetPath: string
   scope?: string
+  /** Add to the selected scope (default) or make its declaration exact. */
+  mode?: AgentSelectionMode
   /** Internal read-only projection; never creates locks, excludes or files. */
   preview?: boolean
   /** Revalidate an approved adoption snapshot under the coordinator lock. */
@@ -69,6 +73,11 @@ function resolveScope(scope?: string): 'local' | 'shared' {
   if (scope === undefined || scope === 'local') return 'local'
   if (scope === 'shared') return 'shared'
   throw new Error('Agent scope must be local (default) or shared.')
+}
+
+function selectAgents(previous: HarnessAgent[], requested: HarnessAgent[] | undefined, mode: AgentSelectionMode): HarnessAgent[] {
+  if (requested === undefined) return previous
+  return mode === 'replace' ? union(requested) : union(previous, requested)
 }
 
 /** Validate only manifest fields consumed here; retain unrelated configuration. */
@@ -181,6 +190,7 @@ async function persist(root: string, before: ManifestSnapshot, next: SaaSFoundry
 
 async function apply(params: SupportParams, requested?: HarnessAgent[]): Promise<AgentSupportResult> {
   const scope = resolveScope(params.scope)
+  const mode = params.mode ?? 'add'
   if (scope === 'local') return applyLocal(params, requested)
   const root = resolve(params.targetPath)
   const { before, source } = await inspect(root)
@@ -188,7 +198,7 @@ async function apply(params: SupportParams, requested?: HarnessAgent[]): Promise
   const local = git ? await readLocalState(git) : emptyLocalState()
   if (params.preview) {
     const previous = configured(before.manifest, source)
-    const candidates = union(previous, requested ?? [])
+    const candidates = selectAgents(previous, requested, mode)
     const plan = await planAgentInstructions({
       targetPath: root,
       agents: candidates,
@@ -236,7 +246,7 @@ async function apply(params: SupportParams, requested?: HarnessAgent[]): Promise
     if ((await snapshot(root)).content !== before.content) throw new Error('Manifest changed before agent setup; retry with the current configuration.')
     if (git && JSON.stringify(await readLocalState(git)) !== JSON.stringify(local)) throw new Error('Private agent inventory changed before shared setup; retry with current configuration.')
     const previous = configured(before.manifest, source)
-    const candidates = AGENTS.filter((agent) => previous.includes(agent) || requested?.includes(agent))
+    const candidates = selectAgents(previous, requested, mode)
     const report = verifiedPlan
       ? await installPlannedAgentInstructions(root, verifiedPlan, before.manifest.fileHashes ?? {})
       : await installAgentInstructions({
@@ -289,7 +299,14 @@ async function apply(params: SupportParams, requested?: HarnessAgent[]): Promise
 export async function enableAgents(params: SupportParams & { agents: string[] }): Promise<AgentSupportResult> {
   resolveScope(params.scope)
   validateAgents(params.agents)
-  return apply(params, params.agents)
+  return apply({ ...params, mode: 'add' }, params.agents)
+}
+
+/** Replace only the selected scope's declaration; retained artifacts are never deleted. */
+export async function replaceAgents(params: SupportParams & { agents: string[] }): Promise<AgentSupportResult> {
+  resolveScope(params.scope)
+  validateAgents(params.agents)
+  return apply({ ...params, mode: 'replace' }, params.agents)
 }
 
 export async function refreshAgents(params: SupportParams): Promise<AgentSupportResult> {
@@ -400,7 +417,8 @@ async function applyLocal(params: SupportParams, requested?: HarnessAgent[]): Pr
   const git = await inspectGitAgentScope(root, { requireLocalSetup: true })
   const local = await readLocalState(git)
   const sharedAgents = configured(before.manifest, source)
-  const localAgents = union(local.agents, requested ?? [])
+  const mode = params.mode ?? 'add'
+  const localAgents = selectAgents(local.agents, requested, mode)
   const effective = union(sharedAgents, localAgents)
   const plan = await planAgentInstructions({
     targetPath: root,
@@ -490,9 +508,13 @@ async function applyLocal(params: SupportParams, requested?: HarnessAgent[]): Pr
     ) {
       throw new Error('Project state changed before acquiring the local setup lock; retry with current state.')
     }
-    const noLongerOwned = Object.keys(local.fileHashes).filter((path) => !Object.prototype.hasOwnProperty.call(owned, path))
-    if (Object.keys(owned).length) {
-      const excludes = await configureLocalAgentExcludes(root, Object.keys(owned))
+    // A later refresh must not expose or delete artifacts retained after a
+    // replacement. Local ownership is independent from the selected declaration;
+    // shared promotion is the only operation that releases these exclusions.
+    const retainedOwned = { ...local.fileHashes, ...local.pendingFileHashes, ...owned }
+    const noLongerOwned: string[] = []
+    if (Object.keys(retainedOwned).length) {
+      const excludes = await configureLocalAgentExcludes(root, Object.keys(retainedOwned))
       report.warnings.push(...excludes.warnings)
     }
     // Journal expected outputs before writing: if the process stops, the next
@@ -511,7 +533,7 @@ async function applyLocal(params: SupportParams, requested?: HarnessAgent[]): Pr
       report.written.push(item.file.path)
     }
     report.fileHashes = owned
-    const finalized = await persistLocal(git, journal, { version: 1, agents: localAgents, fileHashes: owned })
+    const finalized = await persistLocal(git, journal, { version: 1, agents: localAgents, fileHashes: retainedOwned })
     if (noLongerOwned.length) {
       const cleanup = await removeLocalAgentExcludes(root, noLongerOwned)
       report.warnings.push(...cleanup.warnings)

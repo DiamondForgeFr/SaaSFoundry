@@ -122,9 +122,10 @@ describe('harness installer', () => {
       expect(settings.hooks.SessionStart).toBeDefined()
     })
 
-    it('keeps shared discovery opt-in', async () => {
+    it('installs universal onboarding entrypoints without shared skill copies by default', async () => {
       await installHarness({ targetPath: dir, ...params })
-      expect(await fileExists(join(dir, 'AGENTS.md'))).toBe(false)
+      expect(await fileExists(join(dir, 'AGENTS.md'))).toBe(true)
+      expect(await fileExists(join(dir, 'GEMINI.md'))).toBe(true)
       expect(await fileExists(join(dir, '.agents'))).toBe(false)
     })
 

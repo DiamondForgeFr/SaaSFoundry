@@ -6,7 +6,7 @@ import { dirname, join } from 'path'
 import { promisify } from 'util'
 
 import { planAgentInstructions } from '../../../harness/agent-instructions'
-import { enableAgents, readAgentSupport, refreshAgents } from '../../../harness/agent-support'
+import { enableAgents, readAgentSupport, refreshAgents, replaceAgents } from '../../../harness/agent-support'
 
 const exec = promisify(execFile)
 const manifest = { version: '1', structure: 'cli', projectName: 'local-test' }
@@ -20,6 +20,7 @@ describe('checkout-local agent support', () => {
   }
   const get = (path: string) => readFile(join(root, path), 'utf8')
   const enable = (agents: string[]) => enableAgents({ targetPath: root, agents })
+  const replace = (agents: string[]) => replaceAgents({ targetPath: root, agents })
   const privateState = async () => JSON.parse(await readFile(join(await git('rev-parse', '--absolute-git-dir'), 'saasfoundry/agents.json'), 'utf8'))
   const commit = async () => {
     await git('add', '.')
@@ -195,6 +196,21 @@ describe('checkout-local agent support', () => {
     expect(repeated.report.written).toEqual([])
     expect((await refreshAgents({ targetPath: root })).report.written).toEqual([])
     expect(await get('.saasfoundry.json')).toBe(before)
+    expect(await git('status', '--porcelain')).toBe('')
+  })
+  it('replaces local declarations without exposing previous private adapter files', async () => {
+    await enable(['gemini-cli'])
+    const gemini = await get('GEMINI.md')
+
+    const result = await replace(['codex'])
+
+    expect(result.localAgents).toEqual(['codex'])
+    expect(result.configuredAgents).toEqual(['claude-code', 'codex'])
+    expect((await privateState()).agents).toEqual(['codex'])
+    expect((await privateState()).fileHashes['GEMINI.md']).toBeTruthy()
+    expect(await get('GEMINI.md')).toBe(gemini)
+    expect(await git('status', '--porcelain')).toBe('')
+    expect((await refreshAgents({ targetPath: root })).report.written).toEqual([])
     expect(await git('status', '--porcelain')).toBe('')
   })
   it('promotes local Gemini wrapper into reviewable shared files', async () => {

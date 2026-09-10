@@ -7,6 +7,7 @@ import {
   AgentInstructionsError,
   CODEX_SOURCE_CLAUDE_BRIDGE,
   COMMON_INSTRUCTIONS,
+  SELF_ONBOARDING_INSTRUCTIONS,
   HarnessAgent,
   inspectInstructionSource,
   installAgentInstructions,
@@ -90,9 +91,25 @@ describe('shared agent instructions', () => {
     expect(CODEX_SOURCE_CLAUDE_BRIDGE).toContain('@AGENTS.md')
   })
 
-  it('is opt-in and does not generate files for Claude-only configuration', async () => {
-    expect((await installAgentInstructions({ targetPath: root, agents: ['claude-code'] })).written).toEqual([])
-    await expect(get('AGENTS.md')).rejects.toMatchObject({ code: 'ENOENT' })
+  it('publishes universal onboarding entrypoints without copying shared skills for Claude-only configuration', async () => {
+    const result = await installAgentInstructions({ targetPath: root, agents: ['claude-code'] })
+    expect(result.written).toEqual(['AGENTS.md', 'GEMINI.md'])
+    expect(await get('AGENTS.md')).toContain(SELF_ONBOARDING_INSTRUCTIONS)
+    expect(await get('GEMINI.md')).toContain('@AGENTS.md')
+    await expect(get('.agents/skills/sf-git-commit/SKILL.md')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('requires explicit host identity, add/replace/no-change consent, then local/shared scope', () => {
+    for (const instructions of [COMMON_INSTRUCTIONS, ADOPTION_COMMON_INSTRUCTIONS]) {
+      expect(instructions).toContain('identity explicitly supplied by the current')
+      expect(instructions).toContain('Never infer an identity from a model or provider name')
+      expect(instructions).toContain('add the current agent')
+      expect(instructions).toContain('replace the declaration')
+      expect(instructions).toContain('leave the project unchanged')
+      expect(instructions.indexOf('add or replace')).toBeLessThan(instructions.indexOf('local to the'))
+      expect(instructions).toContain('sf agents replace <agents...>')
+      expect(instructions).toContain('never authorizes deleting existing instructions')
+    }
   })
 
   it('identifies missing, Claude, Codex and mixed instruction sources from regular files', async () => {
@@ -167,7 +184,7 @@ describe('shared agent instructions', () => {
   it('allows a Claude source without installed compatibility skills and warns explicitly', async () => {
     await rm(join(root, '.claude/skills'), { recursive: true })
     const result = await installAgentInstructions({ targetPath: root, agents: ['codex'] })
-    expect(result.written).toEqual(['AGENTS.md'])
+    expect(result.written).toEqual(['AGENTS.md', 'GEMINI.md'])
     expect(result.warnings).toContain('.claude/skills: no installed compatibility skills found.')
   })
 
@@ -195,12 +212,12 @@ describe('shared agent instructions', () => {
     await put('.claude/skills/project-custom/SKILL.md', '# Custom procedure\n')
     const first = await installAgentInstructions({ targetPath: root, agents: ['codex'], referenceOnly: true })
     const secondPlan = await planAgentInstructions({ targetPath: root, agents: ['codex'], manifest: { fileHashes: first.fileHashes } })
-    expect(secondPlan.files.map((file) => file.path)).toEqual(['AGENTS.md'])
+    expect(secondPlan.files.map((file) => file.path)).toEqual(['AGENTS.md', 'GEMINI.md'])
     expect(secondPlan.files[0].content.toString()).toContain('.claude/skills/*/SKILL.md')
     const second = await installPlannedAgentInstructions(root, secondPlan, first.fileHashes)
     expect(second.written).toEqual([])
     expect(second.conflicts).toEqual([])
-    expect(second.unchanged).toEqual(['AGENTS.md'])
+    expect(second.unchanged).toEqual(['AGENTS.md', 'GEMINI.md'])
     await expect(get('.agents/skills/project-custom/SKILL.md')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -233,7 +250,7 @@ describe('shared agent instructions', () => {
     expect(failure).toBeInstanceOf(AgentInstructionsError)
     expect(failure).toMatchObject({
       message: expect.stringContaining('.agents/skills/sf-git-commit/SKILL.md'),
-      report: { written: ['AGENTS.md'] }
+      report: { written: ['AGENTS.md', 'GEMINI.md'] }
     })
     expect((failure as AgentInstructionsError).cause).toBeDefined()
     expect((failure as Error).message).not.toContain('Custom project')
@@ -260,11 +277,21 @@ describe('shared agent instructions', () => {
     expect(await get('GEMINI.md.saasfoundry.new')).toContain('@AGENTS.md')
   })
 
-  it.each(['qwen-code', 'generic'] as const)('renders portable instructions for %s without a Gemini wrapper', async (agent) => {
+  it('does not let an undeclared custom Gemini entrypoint block Codex setup', async () => {
+    await put('GEMINI.md', '# Personal Gemini instructions\n')
+    const result = await installAgentInstructions({ targetPath: root, agents: ['codex'] })
+    expect(result.conflicts).toEqual([])
+    expect(result.written).toContain('AGENTS.md')
+    expect(result.written).not.toContain('GEMINI.md')
+    expect(await get('GEMINI.md')).toBe('# Personal Gemini instructions\n')
+    await expect(get('GEMINI.md.saasfoundry.new')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each(['qwen-code', 'generic'] as const)('renders universal portable entrypoints for %s', async (agent) => {
     const result = await installAgentInstructions({ targetPath: root, agents: [agent] })
     expect(result.written).toContain('AGENTS.md')
     expect(result.written).toContain('.agents/skills/sf-git-commit/SKILL.md')
-    await expect(get('GEMINI.md')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await get('GEMINI.md')).toContain('@AGENTS.md')
     if (agent === 'generic') {
       expect(result.warnings.join('\n')).toMatch(/manual/i)
       expect(result.warnings.join('\n')).toMatch(/not verified|unverified|not checked|not-checked/i)
@@ -366,7 +393,7 @@ describe('shared agent instructions', () => {
     await put('AGENTS.md.saasfoundry.new', '# Existing user reconciliation')
     const result = await install(first.fileHashes)
     expect(result.conflicts).toEqual(['AGENTS.md', '.agents/skills/sf-git-commit/SKILL.md'])
-    expect(result.fileHashes).toEqual({})
+    expect(Object.keys(result.fileHashes)).toEqual(['GEMINI.md'])
     expect(await get('AGENTS.md')).toBe('# User rules')
     expect(await get('AGENTS.md.saasfoundry.new')).toBe('# Existing user reconciliation')
     expect(await get('.agents/skills/sf-git-commit/SKILL.md')).toBe('# Custom skill')
