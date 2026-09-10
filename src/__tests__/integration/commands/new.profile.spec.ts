@@ -129,11 +129,13 @@ describe('newCommand (--profile integration)', () => {
     // asserted here, real hash content is covered by the installer unit spec.
     expect(manifest.fileHashes).toBeDefined()
     for (const trackedPath of Object.keys(manifest.fileHashes)) {
-      expect(trackedPath).toMatch(/^\.claude\/(skills|docs)\//)
+      expect(trackedPath).toMatch(/^(?:\.claude\/(?:skills|docs)\/|AGENTS\.md$|GEMINI\.md$)/)
     }
 
     // Harness deposits, no scaffold directories
     expect(await readFile('CLAUDE.md', 'utf8')).toContain('# acme')
+    expect(await readFile('AGENTS.md', 'utf8')).toContain('SaaSFoundry agent instructions')
+    expect(await readFile('GEMINI.md', 'utf8')).toContain('@AGENTS.md')
     const settings = JSON.parse(await readFile(join(tempDir, '.claude', 'settings.json'), 'utf8'))
     expect(JSON.stringify(settings.hooks.SessionStart)).toContain('sf status --claude-friendly --no-network')
     expect(await readdir(tempDir)).not.toContain('apps')

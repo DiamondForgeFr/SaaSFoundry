@@ -1,4 +1,5 @@
 import { analyticsStep } from './steps/analytics.step'
+import { agentsStep } from './steps/agents.step'
 import { pwaStep } from './steps/pwa.step'
 import { emailCredentialsStep } from './steps/email-credentials.step'
 import { harnessProjectStep } from './steps/harness-project.step'
@@ -19,6 +20,7 @@ import { StepDefinition } from './types'
  */
 export const configSteps: StepDefinition[] = [
   profileStep,
+  agentsStep,
   projectStep,
   harnessProjectStep,
   emailCredentialsStep,

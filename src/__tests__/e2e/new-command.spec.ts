@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm } from 'fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import shelljs from 'shelljs'
@@ -12,6 +12,7 @@ import { computeFileHashes } from '../../utils'
 import { SaaSFoundryManifest } from '../../types'
 import { expectFileExists } from '../helpers/assertions'
 import { apiParams, webParams, monorepoRootParams } from '../helpers/fixtures'
+import { installSelectedAgentInstructions, writeMultirepoAgentManifests } from '../../installers/agent-topology'
 
 /**
  * E2E tests for the `sf new` command flow.
@@ -38,6 +39,40 @@ describe('newCommand flow (E2E)', () => {
     shellSpy.mockRestore()
     process.chdir(originalCwd)
     await rm(tempDir, { recursive: true, force: true }).catch(() => {})
+  })
+
+  it('projects the multirepo manifest and selected agent entrypoints into both app checkouts', async () => {
+    const projectDir = join(tempDir, 'agent-multi')
+    await mkdir(join(projectDir, 'apps/agent-multi-api/.claude/skills'), { recursive: true })
+    await mkdir(join(projectDir, 'apps/agent-multi-web/.claude/skills'), { recursive: true })
+    await mkdir(join(projectDir, 'apps/agent-multi-api'), { recursive: true })
+    await mkdir(join(projectDir, 'apps/agent-multi-web'), { recursive: true })
+    await Promise.all([writeFile(join(projectDir, 'apps/agent-multi-api/CLAUDE.md'), '# agent-multi API\n'), writeFile(join(projectDir, 'apps/agent-multi-web/CLAUDE.md'), '# agent-multi web\n')])
+
+    const manifest: SaaSFoundryManifest = {
+      version: '1.0.0-beta',
+      generatedAt: new Date().toISOString(),
+      structure: 'multirepo',
+      projectName: 'agent-multi',
+      modules: { harness: { version: 1, agents: ['claude-code', 'codex', 'gemini-cli'] } }
+    }
+    const originalCwd = process.cwd()
+    process.chdir(projectDir)
+    try {
+      await writeMultirepoAgentManifests(manifest, 'agent-multi')
+      await installSelectedAgentInstructions(manifest, 'agent-multi', ['claude-code', 'codex', 'gemini-cli'])
+    } finally {
+      process.chdir(originalCwd)
+    }
+
+    for (const app of ['agent-multi-api', 'agent-multi-web']) {
+      const appRoot = join(projectDir, 'apps', app)
+      const appManifest = JSON.parse(await readFile(join(appRoot, '.saasfoundry.json'), 'utf8'))
+      expect(appManifest.structure).toBe('multirepo')
+      expect(appManifest.modules.harness.agents).toEqual(['claude-code', 'codex', 'gemini-cli'])
+      expect(await readFile(join(appRoot, 'AGENTS.md'), 'utf8')).toContain('SaaSFoundry agent instructions')
+      expect(await readFile(join(appRoot, 'GEMINI.md'), 'utf8')).toContain('@AGENTS.md')
+    }
   })
 
   /**
