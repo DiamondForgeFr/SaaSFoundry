@@ -119,6 +119,20 @@ changing anything. A mismatch is a failed handoff observation; do not hide it by
 Acceptance requires both hosts to report the same ticket and canonical SRS state, the second to preserve the first host's accepted work, required checks to pass, and every transition to use the
 guarded workflow command. Provider login or a filesystem smoke alone does not satisfy this result.
 
+## SaaSFoundryAI dogfood baseline
+
+This repository declares `claude-code` and `codex` together in `.saasfoundry.json`. `CLAUDE.md`, `AGENTS.md`, and the reviewed `.claude/skills` / `.agents/skills` trees are shared project artifacts.
+`AGENTS.md` points Codex back to the same authoritative project rules and guarded workflow used by Claude Code. Private `.codex` settings, credentials, plugins, MCP configuration, model selection, and
+host permissions are not part of the declaration and must not be committed as acceptance evidence.
+
+Test the declaration from a disposable clone or worktree containing only reviewed tracked files. Both hosts must resolve the same manifest, ticket, SRS root and status document, and both workflow help
+commands must expose the same guards. Record hashes and modes before and after the read-only checks. Classify file parity and direct script execution as `structural`; classify native instruction
+loading, hooks, authentication, delegation, and model behavior as `observed` only when the named host/version actually produced that evidence. Missing native observation remains `not-checked` rather
+than being inferred from a passing fixture.
+
+Generated-project acceptance uses the same contract. A monorepo has one harness root. A multirepo gives its API and web repositories separate minimal `structure: cli` manifests and agent entrypoints,
+so either checkout can initialize independently without treating the inner repository as the outer stack coordinator.
+
 ## Everyday sequential and simultaneous work
 
 Outside this acceptance exercise, sequential work may use one checkout after the first host has stopped and left a precise handoff. The next host rechecks the manifest, ticket, SRS and diff rather

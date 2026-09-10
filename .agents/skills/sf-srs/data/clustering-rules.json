@@ -1,0 +1,244 @@
+{
+  "$schema": "https://raw.githubusercontent.com/DiamondForgeFr/SaasFoundryAI/master/schemas/clustering-rules.schema.json",
+  "version": 1,
+  "description": "Stack-agnostic clustering & seeding rules consumed by the sf-srs drafting flow (`srs-cli.sh draft --from codebase`). The finding `kind`s below are CONCEPTS, not frameworks: `endpoint` = any invocable operation boundary (HTTP route, RPC/Tauri command, CLI command, gRPC method, queue/event handler, serverless function); `entity` = any persistent record type (SQL DDL/migrations, any ORM model, a struct backing a store, a protobuf message); `ui-flow` = any user-facing view (web/native/TUI/CLI). The deterministic CLI scanner recognises a SUBSET of stacks today (NestJS controllers, React pages, Prisma models, Jest/Vitest tests) and returns sparse findings on others — when that happens the AGENT supplements by reading the project's own operation/model registry directly (e.g. a Tauri `generate_handler!` list, a Go router, a FastAPI app, SQL migrations). SKILL.md points to this file; edit here, not in prose.",
+  "finding_kinds": [
+    {
+      "kind": "endpoint",
+      "source": "An externally-invocable operation / command boundary. The scanner detects NestJS @Controller methods today; the same concept covers HTTP routes (Express/Fastify/Flask/Gin/Rails), RPC & Tauri commands, CLI subcommands, gRPC methods, message/queue handlers, and serverless functions. When the scanner is blind to the stack, enumerate these from the project's own registry (route table, command-handler list, etc.).",
+      "area_heuristic": "The nearest structural unit that groups the operation in THIS project: module / package / crate / feature folder (e.g. src/modules/<area>/, src-tauri/src/<area>/, internal/<area>/, app/<area>/, cmd/<area>/). Use the repo's own convention, not a fixed path."
+    },
+    {
+      "kind": "ui-flow",
+      "source": "A user-facing view, screen, or flow. The scanner detects routed React pages today; the same concept covers Vue/Svelte/Angular routes, native screens (SwiftUI/Jetpack Compose), desktop windows, TUI views, and CLI subcommands with real UX.",
+      "area_heuristic": "The view's feature folder or route group (e.g. src/pages/<area>/, screens/<area>/, the route segment). Use the repo's own convention."
+    },
+    {
+      "kind": "entity",
+      "source": "A persistent data model / record type. The scanner detects Prisma `model` blocks today; the same concept covers SQL DDL & migrations, TypeORM/Sequelize/Drizzle/SQLAlchemy/Ecto/Diesel/ActiveRecord models, structs backing a store, and protobuf/IDL messages.",
+      "area_heuristic": "Map the model name to the domain it serves (e.g. User→accounts, Session→auth, Recording→capture). Use the project's own naming."
+    },
+    {
+      "kind": "test",
+      "source": "An automated test case. The scanner detects Jest/Vitest `describe` / `it` / `test` today; the same concept covers Rust `#[test]` & integration tests, Go `testing`, pytest, JUnit, RSpec, and Playwright/Cypress e2e.",
+      "area_heuristic": "src/modules/<area>/, the tested unit's folder, or the filename stem. Use the repo's own layout."
+    },
+    {
+      "kind": "doc-context",
+      "source": "Project documentation: README, CLAUDE.md / AGENTS.md, docs/**/*.md, architecture decision records, design docs, BACKLOG / roadmap files.",
+      "area_heuristic": "folder or document name (docs, modules, the feature it describes)."
+    }
+  ],
+  "reading_findings": [
+    "Every shape has `kind` + `title` — use them for first-pass clustering.",
+    "`area` is the glue: findings that share an `area` usually belong to the same Epic / FR cluster.",
+    "`file` is the authoritative path — quote it back to the user when proposing a cluster.",
+    "`endpoint.hasTests` flags `true` when the same `area` has at least one test finding — use it to prime the TC section.",
+    "`ui-flow.linkedEndpointGuess` is a soft hint (filename / route substring match) — verify before trusting.",
+    "`doc-context.excerpt` is capped at 280 chars — treat it as a summary seed, not the full text.",
+    "Scanner coverage is stack-specific and best-effort: if `draft --from codebase` returns few or no `endpoint` / `entity` findings for a stack it doesn't parse (Rust/Tauri, Go, Python, mobile, raw SQL…), DO NOT conclude the surface is empty — read the project's own operation/model registry directly and synthesise the findings yourself before clustering."
+  ],
+  "epic_fr_clustering": {
+    "order": "Epic-by-Epic, then FR-by-FR",
+    "steps": [
+      {
+        "id": 1,
+        "name": "Group by area",
+        "action": "Collect every finding whose `area` matches — `area` is whatever structural unit the project uses (module, package, crate, feature folder), not a fixed `src/modules/` path. Add `doc-context` findings that share the area name or a parent folder. If scanner findings are sparse for this stack, first enumerate the area's operations / models from the source tree yourself."
+      },
+      {
+        "id": 2,
+        "name": "Pick the Epic level",
+        "action": "One Epic per coherent area / domain (e.g. `auth`, `storage`, `capture`, `billing`). Title + narrative come from the richest `doc-context` in the group (README / CLAUDE.md / ADR), or from the user's wording."
+      },
+      {
+        "id": 3,
+        "name": "Propose the FRs",
+        "rules": [
+          "One FR per `endpoint` / operation (or per tight cluster — CRUD or a command family on the same resource collapses into one FR).",
+          "Reuse `ui-flow` views / routes as acceptance criteria on the user-facing FR.",
+          "Populate `dsRefs` / `tcRefs` from the items seeded in step 4 so the FR surfaces traceability links."
+        ]
+      },
+      {
+        "id": 4,
+        "name": "Seed the Epic-level DS / TC / NFR sections",
+        "action": "Every Epic carries the SRS five-category shape (UR + FR + DS + TC + NFR). See `templates/examples/example-epic.md` (rendered) and `templates/examples/example-epic.spec.json` (machine-readable) for the exact layout — the example uses a NestJS/Prisma/React auth module to stay concrete, but the spec format is stack-neutral. Apply the `seeding` rules below."
+      },
+      {
+        "id": 5,
+        "name": "Flag gaps",
+        "action": "Any operation with no matching test (`endpoint.hasTests=false`, or no `test` finding in the area) is a test-coverage gap — surface it as a **TODO** TC item (title `\"<operation> — happy path\"`, `expectedResult: \"to write\"`), not silently."
+      }
+    ]
+  },
+  "seeding": {
+    "philosophy": "Scanners surface raw material (and only for the stacks they parse); the agent synthesises items and fills the gaps for unparsed stacks. Reuse the L1+L2+L3 pattern from the eval: deterministic findings feed AI prompts, the agent always runs, the user always validates before write.",
+    "ds_items": {
+      "description": "One `DsItem` per material design decision visible in code — a data model, an operation's input/output contract, or a UI form — whatever the stack.",
+      "mappings": [
+        {
+          "finding": "entity — a persistent record type (Prisma/ORM model, SQL DDL, a struct backing a store, a protobuf message)",
+          "title": "Data model — <EntityName>",
+          "description_source": "fields + keys / uniqueness / relations (@id/@unique/@relation, PRIMARY KEY / FOREIGN KEY, struct tags) + soft-delete / deletedAt flag if present"
+        },
+        {
+          "finding": "operation with a non-trivial input contract (HTTP body, RPC / command arguments, CLI flags) — ≥ 2 fields",
+          "title": "API contract — <METHOD> <path>",
+          "description_source": "input field list + validation rules surfaced by the stack's validators (class-validator, zod, serde, pydantic, struct tags)"
+        },
+        {
+          "finding": "ui-flow with a form / input surface (≥ 2 fields)",
+          "title": "UI form — <PageName>",
+          "description_source": "form field list + the operation it submits to, if known"
+        }
+      ],
+      "grouping_rules": [
+        "Group by the Epic's area.",
+        "Set `frRefs` to every FR in the group whose operation / entity / UI flow matches.",
+        "Deduplicate by title prefix — if two entities share the same core name (e.g. `User` + `UserProfile`), collapse into a single DS item with both sub-models listed in the description."
+      ]
+    },
+    "tc_items": {
+      "description": "One `TcItem` per `test.cases[]` entry.",
+      "mappings": [
+        {
+          "source": "test.cases[i].title",
+          "target_field": "title",
+          "rule": "the `it(...)` / `test(...)` / `#[test]` name verbatim"
+        },
+        {
+          "source": "test.cases[i] structure",
+          "target_field": "steps",
+          "rule": "parse Given/When/Then from the title if phrased that way, else bullet the `describe` chain"
+        },
+        {
+          "source": "assertion in the test body (if readable)",
+          "target_field": "expectedResult",
+          "rule": "if not parseable, use `\"see <test.file>\"`"
+        },
+        {
+          "source": "test.area or endpoint.area",
+          "target_field": "frRefs",
+          "rule": "every FR whose area matches"
+        }
+      ],
+      "todo_for_untested_endpoints": {
+        "when": "an operation (`endpoint`) with `hasTests=false`, or any operation in the area with no matching `test` finding",
+        "emit_as": "TODO TC item (the drift is auditable, not invisible)",
+        "shape": {
+          "id": "TC-<area>-<slug>-todo",
+          "title": "<operation> — happy path",
+          "expectedResult": "to write",
+          "frRefs": ["<FR-id>"]
+        },
+        "reviewer_options": ["accept the TODO (making the gap part of the public contract)", "reject it and flag upstream"]
+      }
+    },
+    "nfr_items": {
+      "description": "NFRs are **proposed, not derived** — every seeded item must be marked for explicit human validation. Always emit with `priority: 'P3'` and `target: '<proposed — needs human validation>'`. The reviewer lifts priority / refines target before accepting. The signals below are stack-neutral: match the capability, not the framework.",
+      "layer1_stack_signals": [
+        {
+          "signal": "Authentication / session handling present — login, tokens, sessions, or credentials anywhere in the code (any stack: an /auth/* surface, a Session / RefreshToken record, an OAuth/JWT library, a stored password hash)",
+          "seeded_nfrs": ["Security — JWT access token expiry ≤ 15 min", "Security — refresh token rotation on every use", "Security — login rate limit ≤ 5 attempts / minute / IP"]
+        },
+        {
+          "signal": "Internationalisation present — locale files or an i18n library (i18next, gettext / .po, ICU, Fluent, a `locales/` folder), any stack",
+          "seeded_nfrs": ["i18n — all user-facing strings translated in FR + EN", "a11y — locale switchable without restart / reload"]
+        },
+        {
+          "signal": "Persistent datastore present — SQL or NoSQL, via an ORM or raw migrations (Prisma, Drizzle, SQLAlchemy, Ecto, Diesel, SQLite, Postgres, Mongo…)",
+          "seeded_nfrs": ["Data — soft delete via deletedAt (or an equivalent retention policy) on user-owned entities", "Data — schema migrations are reversible, or forward-only by explicit policy"]
+        },
+        {
+          "signal": "Hosted / always-on component — a container or orchestration manifest (Docker / Compose / k8s) or a health / readiness endpoint",
+          "seeded_nfrs": ["Ops — health check p95 ≤ 1 s", "Ops — graceful shutdown drains in-flight work"]
+        },
+        {
+          "signal": "Automated end-to-end / integration suite present (Playwright, Cypress, Rust integration tests, pytest e2e, Detox…)",
+          "seeded_nfrs": ["Quality — e2e coverage on the critical user flows of the app"]
+        },
+        {
+          "signal": "Public API contract or schema artefact present (OpenAPI / Swagger, GraphQL schema, protobuf / IDL, a generated typed client)",
+          "seeded_nfrs": ["Docs — the API contract is regenerated on every change (CI guard)"]
+        },
+        {
+          "signal": "Local-first / on-device processing of user data — an offline app, or a core flow that runs without a server round-trip (desktop / mobile app, local model, local DB)",
+          "seeded_nfrs": [
+            "Privacy — user data never leaves the device except on explicit, consented actions",
+            "Security — API keys & secrets stored in the OS keychain / secret manager, never in plaintext or VCS"
+          ]
+        },
+        {
+          "signal": "Native app requesting OS permissions — microphone, camera, screen capture, files, location, notifications",
+          "seeded_nfrs": [
+            "Reliability — graceful degradation when a permission is denied (the feature stays usable in a reduced mode)",
+            "Security — request the least privilege needed and surface why each permission is asked"
+          ]
+        }
+      ],
+      "layer2_standard_saas_catalogue": [
+        {
+          "nfr": "Performance — define a responsiveness budget appropriate to the app (API p95 latency for services, interaction latency for UIs, throughput for batch / CLI) and hold it under expected load",
+          "always_propose": true
+        },
+        {
+          "nfr": "Reliability — every failure path handled gracefully and actionably (no silent failures, no raw stack traces shown to users)",
+          "always_propose": true
+        },
+        {
+          "nfr": "Security — secrets & credentials live in a secret manager / OS keychain, never plaintext or in version control",
+          "always_propose": true
+        },
+        {
+          "nfr": "Availability — an uptime / recovery target (e.g. 99.5%)",
+          "condition": "only for hosted or always-on components"
+        },
+        {
+          "nfr": "Privacy — sensitive / personal data encrypted at rest and minimised",
+          "condition": "only if the system stores PII or otherwise sensitive data"
+        },
+        {
+          "nfr": "Safety — user-provided files / untrusted input validated (and scanned where relevant) before persistence or processing",
+          "condition": "only if the system ingests user-provided files or untrusted input"
+        }
+      ]
+    }
+  },
+  "coverage_table": {
+    "purpose": "Before firing the review prompt on an Epic cluster, emit a one-shot coverage table so the reviewer sees what got seeded per category and where it came from.",
+    "template": [
+      "SRS coverage for Epic: <title>",
+      "┌──────┬───────────────┬──────────────────────────────────────────────┐",
+      "│ Cat  │ Items proposed│ Source                                       │",
+      "├──────┼───────────────┼──────────────────────────────────────────────┤",
+      "│ UR   │ 3             │ doc-context + inferred from FRs              │",
+      "│ FR   │ 5             │ 5 operation clusters                         │",
+      "│ DS   │ 4             │ 2 entities + 1 operation + 1 UI form         │",
+      "│ TC   │ 8 (+ 2 TODO)  │ test.cases[] across 3 spec files             │",
+      "│ NFR  │ 4 (proposed)  │ stack signals: auth + i18n + datastore + e2e │",
+      "└──────┴───────────────┴──────────────────────────────────────────────┘"
+    ],
+    "red_flag": "A cluster with **zero DS or zero TC** is a red flag — either the area is genuinely pure glue (no data model, no tests yet) or the scanners missed something (likely on a stack the deterministic scanner doesn't parse). Surface the anomaly in the review prompt — and read the source yourself before concluding — rather than silently proposing an Epic with empty sections."
+  },
+  "review_loop": {
+    "rule": "Never write to the SRS backend without confirmation. Drive the loop one cluster at a time.",
+    "prompt_template": [
+      "🔍 J'ai trouvé <N> éléments pour le domaine `<area>` (scanner + lecture du code). Je te propose de créer :",
+      "",
+      "  📘 Epic : <title>",
+      "     ├─ FR : <title 1>  (based on: <file-1>, <file-2>)",
+      "     ├─ FR : <title 2>  (based on: <file-3>)",
+      "     └─ gaps : <opération sans test>, <vue sans opération liée>",
+      "",
+      "Je pars sur cette structure, ou tu veux retailler l'Epic ? [accept / edit / reject / skip-area]"
+    ],
+    "branches": {
+      "accept": "serialise the cluster as DraftCandidate[] and call `srs-cli.sh write --spec <tmp.json>`",
+      "edit": "negotiate the title / narrative / FR split and re-confirm",
+      "reject": "drop the cluster and continue",
+      "skip-area": "park the area and continue with the next"
+    },
+    "throttle": "Never batch-accept more than one Epic per prompt — the reviewer has to be able to course-correct cluster by cluster."
+  }
+}

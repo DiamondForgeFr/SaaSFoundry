@@ -1,0 +1,60 @@
+name: bug
+label: "🐛 Bug Fix"
+description: "Quick fix for existing bug, minimal ceremony"
+
+# Status workflow
+skipStatuses:
+  - Backlog  # Direct to In Progress for urgent bugs
+
+# Steps configuration
+steps:
+  analyze:
+    enabled: false  # No analysis needed
+    depth: null
+    agents: 0
+  plan:
+    enabled: false  # Direct fix
+    depth: null
+    approval: false
+  subtasks:
+    enabled: false  # Single fix, no subtasks
+    mandatory: false
+  examine:
+    enabled: false  # No adversarial review
+  tests:
+    type: "regression"  # Regression test mandatory
+    mandatory: true
+
+# Test requirements
+testing:
+  unit: true  # Unit test for the bug fix
+  e2e: false  # No E2E unless complex bug
+  regression: true  # Always regression test
+  coverage: null
+
+# AI guidance for this complexity level
+aiInstructions: |
+  This is a bug fix. Keep it focused:
+
+  **Analyze Phase (SKIP):**
+  - Go directly to the bug location
+  - No exploration agents needed
+
+  **Plan Phase (SKIP):**
+  - Identify root cause
+  - Fix the bug directly
+
+  **Execute Phase:**
+  - Make the minimal fix
+  - No refactoring unless necessary for the fix
+
+  **Validate Phase:**
+  - Build + lint + typecheck
+  - Create regression test to prevent recurrence
+
+  **Examine Phase (SKIP):**
+  - No adversarial review needed
+
+  **Tests Phase:**
+  - Mandatory regression test
+  - Optional E2E if complex bug

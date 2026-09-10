@@ -126,7 +126,7 @@ In progress starts it, and it reaches Done only after every native child has boa
 
 ${SELF_ONBOARDING_INSTRUCTIONS}
 
-${CAPABILITIES}`
+${CAPABILITIES.trimEnd()}\n`
 
 export const CODEX_SOURCE_CLAUDE_BRIDGE = `# SaaSFoundry Claude compatibility instructions
 
@@ -138,7 +138,7 @@ references. Claude Code must load applicable procedures manually from
 Follow the coding-agent identity and onboarding procedure in \`AGENTS.md\` before changing
 any declaration.
 
-${CAPABILITIES}
+${CAPABILITIES.trimEnd()}
 Do not copy or change agent settings, hooks, permissions, credentials, secrets or models.
 `
 
@@ -156,7 +156,7 @@ all workflow guards, tests and approval requirements.
 
 ${SELF_ONBOARDING_INSTRUCTIONS}
 
-${CAPABILITIES}
+${CAPABILITIES.trimEnd()}
 Do not copy or change agent settings, hooks, permissions, credentials, secrets or models.
 `
 

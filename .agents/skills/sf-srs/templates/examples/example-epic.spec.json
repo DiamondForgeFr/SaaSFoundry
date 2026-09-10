@@ -1,0 +1,183 @@
+{
+  "title": "Authentication & session management",
+  "parentPageId": "<replaced-at-write-time>",
+  "id": "EPIC-AUTH",
+  "businessValue": "Users can create an account, sign in securely, and stay signed in across short interruptions without re-entering credentials.",
+  "scope": "Covers signup with account validation, email+password signin, and signout. Session refresh is handled internally via UserToken{type=SESSION_REFRESH}. Does NOT cover SSO, password reset, or MFA (tracked as separate Epics).",
+
+  "urs": [
+    { "id": "UR-AUTH-001", "narrative": "As a new user, I can create an account with an email and a password so I can access the product.", "priority": "P1" },
+    { "id": "UR-AUTH-002", "narrative": "As a returning user, I can sign in with my email and password to resume using the product.", "priority": "P1" },
+    { "id": "UR-AUTH-003", "narrative": "As a signed-in user, I can sign out on demand so my session on a shared device is terminated.", "priority": "P2" }
+  ],
+
+  "frs": [
+    {
+      "id": "FR-AUTH-001",
+      "title": "Email + password signin",
+      "description": "POST /auth/signin validates credentials against User.password (bcrypt) and issues a short-lived access JWT + a SESSION_REFRESH UserToken.",
+      "priority": "P1",
+      "urRefs": ["UR-AUTH-002"],
+      "dsRefs": ["DS-AUTH-001", "DS-AUTH-002", "DS-AUTH-004", "DS-AUTH-006"],
+      "tcRefs": ["TC-AUTH-001", "TC-AUTH-002"],
+      "endpoint": "POST /auth/signin",
+      "acceptanceCriteria": [
+        "Valid credentials return 200 with an access token and a refresh token (cookie or body depending on deployment).",
+        "Invalid credentials return 401 with a generic error message (no user-enumeration leak).",
+        "An inactive User (User.isActive=false) cannot sign in; the response invites the user to validate their account first."
+      ]
+    },
+    {
+      "id": "FR-AUTH-002",
+      "title": "Signup with account validation",
+      "description": "POST /auth/signup creates a User with isActive=false and a UserToken{type=ACCOUNT_VALIDATION}. Account becomes usable only after the validation token is consumed (typically via an email link).",
+      "priority": "P1",
+      "urRefs": ["UR-AUTH-001"],
+      "dsRefs": ["DS-AUTH-001", "DS-AUTH-002", "DS-AUTH-005"],
+      "tcRefs": ["TC-AUTH-003", "TC-AUTH-004", "TC-AUTH-005"],
+      "endpoint": "POST /auth/signup",
+      "acceptanceCriteria": [
+        "Unique email + valid password return 200 and queue an account-validation token + email.",
+        "Duplicate email is handled gracefully with a generic response (no user-enumeration leak).",
+        "Unvalidated accounts have User.isActive=false and cannot sign in until the token is consumed."
+      ]
+    },
+    {
+      "id": "FR-AUTH-003",
+      "title": "Signout",
+      "description": "POST /auth/signout revokes the caller's SESSION_REFRESH UserToken so the refresh chain for this session can no longer be used.",
+      "priority": "P2",
+      "urRefs": ["UR-AUTH-003"],
+      "dsRefs": ["DS-AUTH-002", "DS-AUTH-004"],
+      "tcRefs": ["TC-AUTH-006"],
+      "endpoint": "POST /auth/signout",
+      "acceptanceCriteria": [
+        "Authenticated caller receives 200 and their SESSION_REFRESH token is invalidated.",
+        "Subsequent refresh attempts with the revoked token return 401.",
+        "Unauthenticated callers receive 401 without leaking whether the token existed."
+      ]
+    }
+  ],
+
+  "dsItems": [
+    {
+      "id": "DS-AUTH-001",
+      "title": "Data model — User",
+      "description": "Prisma model User { id, email @unique, password, isActive @default(false), peopleId?, lastLoginAt? }. Passwords hashed with bcrypt. isActive gates signin until the ACCOUNT_VALIDATION token is consumed.",
+      "frRefs": ["FR-AUTH-001", "FR-AUTH-002"],
+      "group": "Data model"
+    },
+    {
+      "id": "DS-AUTH-002",
+      "title": "Data model — UserToken",
+      "description": "Prisma model UserToken { id, userId, token, type: TokenType, expiresAt? } with enum TokenType { ACCOUNT_VALIDATION, SESSION_REFRESH, PASSWORD_RESET, INVITATION }. @@unique([userId, type]) enforces one live token per (user, type).",
+      "frRefs": ["FR-AUTH-001", "FR-AUTH-002", "FR-AUTH-003"],
+      "group": "Data model"
+    },
+    {
+      "id": "DS-AUTH-004",
+      "title": "API contract — POST /auth/signin",
+      "description": "Body: SignInDto { email, password }. Response: SignInResponseDto { accessToken, refreshToken, user }. Emits SESSION_REFRESH UserToken.",
+      "frRefs": ["FR-AUTH-001", "FR-AUTH-003"],
+      "group": "API contract"
+    },
+    {
+      "id": "DS-AUTH-005",
+      "title": "API contract — POST /auth/signup",
+      "description": "Body: SignUpDto { email, password, locale? }. Response: SignUpResponseDto. Creates User.isActive=false + ACCOUNT_VALIDATION UserToken; when the email module is installed, a validation email is queued.",
+      "frRefs": ["FR-AUTH-002"],
+      "group": "API contract"
+    },
+    {
+      "id": "DS-AUTH-006",
+      "title": "UI form — SignInPage",
+      "description": "web/src/pages/public/SignInPage.tsx — fields: email, password. Zod schema: email format + password min length. Submits via the useSigninMutation React Query hook.",
+      "frRefs": ["FR-AUTH-001"],
+      "group": "UI form"
+    }
+  ],
+
+  "tcItems": [
+    {
+      "id": "TC-AUTH-001",
+      "title": "should sign in user successfully",
+      "frRefs": ["FR-AUTH-001"],
+      "expectedResult": "200 with access + refresh tokens and User.lastLoginAt updated — see auth.service.spec.ts"
+    },
+    {
+      "id": "TC-AUTH-002",
+      "title": "should throw UnauthorizedException if credentials are invalid",
+      "frRefs": ["FR-AUTH-001"],
+      "expectedResult": "401 Unauthorized with generic message (same shape for unknown email and wrong password)"
+    },
+    {
+      "id": "TC-AUTH-003",
+      "title": "should create a new user successfully",
+      "frRefs": ["FR-AUTH-002"],
+      "expectedResult": "User row with isActive=false + UserToken{type=ACCOUNT_VALIDATION} — see auth.service.spec.ts"
+    },
+    {
+      "id": "TC-AUTH-004",
+      "title": "should handle existing user gracefully",
+      "frRefs": ["FR-AUTH-002"],
+      "expectedResult": "Signup with a duplicate email returns a generic response (no user-enumeration leak)"
+    },
+    {
+      "id": "TC-AUTH-005",
+      "title": "should create account when signing in with confirmation token",
+      "frRefs": ["FR-AUTH-002"],
+      "expectedResult": "Consuming an ACCOUNT_VALIDATION token flips User.isActive=true and allows subsequent signin"
+    },
+    { "id": "TC-AUTH-006", "title": "should sign out user successfully", "frRefs": ["FR-AUTH-003"], "expectedResult": "SESSION_REFRESH UserToken for the caller is deleted / revoked" },
+    {
+      "id": "TC-AUTH-007",
+      "title": "TODO — POST /auth/signup triggers email dispatch with the validation link",
+      "frRefs": ["FR-AUTH-002"],
+      "expectedResult": "to write — seeded because the email dispatch path is not covered by auth.service.spec.ts today"
+    }
+  ],
+
+  "nfrItems": [
+    { "id": "NFR-AUTH-001", "title": "JWT access token expiry ≤ 15 minutes", "target": "accessToken.exp − iat ≤ 900s", "priority": "P1", "frRefs": ["FR-AUTH-001"], "group": "Security" },
+    {
+      "id": "NFR-AUTH-002",
+      "title": "Refresh token rotation on every use",
+      "target": "SESSION_REFRESH UserToken is rotated on each refresh; old token is invalidated before the new one is issued",
+      "priority": "P1",
+      "frRefs": ["FR-AUTH-001", "FR-AUTH-003"],
+      "group": "Security"
+    },
+    {
+      "id": "NFR-AUTH-003",
+      "title": "Auth endpoints rate-limited per IP",
+      "target": "≤ 5 failed signin attempts per IP per 60s — proposed, needs human validation",
+      "priority": "P3",
+      "frRefs": ["FR-AUTH-001"],
+      "group": "Security"
+    },
+    {
+      "id": "NFR-AUTH-004",
+      "title": "Auth error messages translated (FR + EN)",
+      "target": "All user-facing error strings resolve through i18next in FR and EN — proposed, needs human validation",
+      "priority": "P3",
+      "frRefs": ["FR-AUTH-001", "FR-AUTH-002"],
+      "group": "i18n"
+    },
+    {
+      "id": "NFR-AUTH-005",
+      "title": "User deactivation flow via isActive flag",
+      "target": "Admin can flip User.isActive=false to lock an account without deleting the row — proposed, needs human validation",
+      "priority": "P3",
+      "frRefs": ["FR-AUTH-001"],
+      "group": "Data lifecycle"
+    },
+    {
+      "id": "NFR-AUTH-006",
+      "title": "Signin p95 latency ≤ 1 second",
+      "target": "POST /auth/signin p95 ≤ 1s under expected concurrency — proposed, needs human validation",
+      "priority": "P3",
+      "frRefs": ["FR-AUTH-001"],
+      "group": "Performance"
+    }
+  ]
+}

@@ -29,6 +29,14 @@ describe('Preconditions first directive (scaffold mirrors)', () => {
     expect(content).toMatch(/sf status --claude-friendly/)
   })
 
+  it.each(CLAUDE_MD_SCAFFOLDS)('%s contains the coding-agent onboarding contract', (file) => {
+    const content = readFileSync(file, 'utf8')
+    expect(content).toMatch(/Coding-agent identity and onboarding/)
+    expect(content).toMatch(/sf agents list --json/)
+    expect(content).toMatch(/sf agents enable/)
+    expect(content).toMatch(/sf agents replace/)
+  })
+
   it('repo-root CLAUDE.md contains the Preconditions first section', () => {
     const content = readFileSync(path.resolve(ROOT, 'CLAUDE.md'), 'utf8')
     expect(content).toMatch(/Preconditions first/)

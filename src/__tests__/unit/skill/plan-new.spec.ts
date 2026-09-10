@@ -109,6 +109,24 @@ describe('skill/plan-new', () => {
     })
   })
 
+  describe('Explicit coding-agent declaration', () => {
+    it('translates registered coding tools to --agents without treating models as profiles', async () => {
+      const { stdout, code } = await runWithIntent({
+        projectName: 'shared-harness',
+        structure: 'monorepo',
+        agents: ['claude-code', 'codex']
+      })
+      expect(code).toBe(0)
+      expect(stdout.trim()).toBe('sf new --non-interactive --project-name shared-harness --structure monorepo --agents claude-code,codex')
+    })
+
+    it('rejects provider/model names that are not registered coding-tool profiles', async () => {
+      const { stderr, code } = await runWithIntent({ projectName: 'bad-agent', structure: 'monorepo', agents: ['gpt'] })
+      expect(code).toBe(2)
+      expect(stderr).toMatch(/invalid value "gpt" in agents/)
+    })
+  })
+
   describe('Guided — partial intent', () => {
     it('exits 2 when a required field is missing', async () => {
       const { code, stderr } = await runWithIntent({ projectName: 'incomplete' })
