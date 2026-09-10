@@ -31,8 +31,8 @@ describe('compiled sf agents adopt command', () => {
     await writeFile(join(project, '.saasfoundry.json'), JSON.stringify({ version: 'test', projectName: 'adoption-demo', generatedAt: '2026-09-08', structure: 'cli' }, null, 2) + '\n')
   }
 
-  async function preview(agents: string[], scope: 'local' | 'shared' = 'local') {
-    const result = run(...agents, '--scope', scope, '--json')
+  async function preview(agents: string[], scope: 'local' | 'shared' = 'local', mode: 'add' | 'replace' = 'add') {
+    const result = run(...agents, '--scope', scope, '--mode', mode, '--json')
     if (result.status !== 0) throw new Error(result.stderr + result.stdout)
     return JSON.parse(result.stdout) as { planId: string; canApply: boolean; source: string; conflicts: string[]; prerequisites: string[] }
   }
@@ -91,6 +91,19 @@ describe('compiled sf agents adopt command', () => {
     expect(await readFile(join(project, 'AGENTS.md'), 'utf8')).toBe(original)
     expect(await readFile(join(project, 'CLAUDE.md'), 'utf8')).toContain('@AGENTS.md')
     expect(JSON.parse(await readFile(join(project, '.saasfoundry.json'), 'utf8')).modules.harness.agents).toEqual(expect.arrayContaining(['codex', 'claude-code']))
+  })
+  it('binds replacement mode into the reviewed plan and applies an exact shared declaration', async () => {
+    await writeManifest()
+    await writeFile(join(project, 'CLAUDE.md'), '# Existing Claude instructions\n')
+    const add = await preview(['codex'], 'shared')
+    const replace = await preview(['codex'], 'shared', 'replace')
+    expect(replace.planId).not.toBe(add.planId)
+
+    const applied = run('codex', '--scope', 'shared', '--mode', 'replace', '--apply', '--plan', replace.planId, '--json')
+
+    expect(applied.status).toBe(0)
+    expect(JSON.parse(applied.stdout).sharedAgents).toEqual(['codex'])
+    expect(JSON.parse(await readFile(join(project, '.saasfoundry.json'), 'utf8')).modules.harness.agents).toEqual(['codex'])
   })
 
   it('adopts locally without modifying tracked files or exposing generated files to Git', async () => {

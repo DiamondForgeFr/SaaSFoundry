@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { AGENT_REGISTRY_VERSION, getAgentIds, listAgentProfiles } from '../harness/agent-registry'
-import { enableAgents, readAgentSupport, refreshAgents } from '../harness/agent-support'
+import { enableAgents, readAgentSupport, refreshAgents, replaceAgents } from '../harness/agent-support'
 import { applyAgentAdoption, planAgentAdoption } from '../harness/agent-adoption'
 import { collectAgentDiagnostics, type DiagnosticCheck } from '../harness/agent-diagnostics'
 
@@ -9,6 +9,7 @@ interface AgentCommandOptions {
   scope?: string
   apply?: boolean
   plan?: string
+  mode?: string
   checkRuntime?: boolean
 }
 
@@ -26,7 +27,7 @@ async function adoptAgents(agents: string[], options: AgentCommandOptions): Prom
   if (!options.apply && options.plan) throw new Error("'--plan' is only valid with '--apply'. Preview adoption without either flag first.")
 
   if (options.apply) {
-    const result = await applyAgentAdoption({ targetPath: process.cwd(), agents, scope: options.scope, planId: options.plan! })
+    const result = await applyAgentAdoption({ targetPath: process.cwd(), agents, scope: options.scope, mode: options.mode, planId: options.plan! })
     if (options.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n')
     else {
       process.stdout.write(`Adoption applied in ${result.scope} scope.\n`)
@@ -39,10 +40,11 @@ async function adoptAgents(agents: string[], options: AgentCommandOptions): Prom
     return
   }
 
-  const plan = await planAgentAdoption({ targetPath: process.cwd(), agents, scope: options.scope })
+  const plan = await planAgentAdoption({ targetPath: process.cwd(), agents, scope: options.scope, mode: options.mode })
   if (options.json) process.stdout.write(JSON.stringify(plan, null, 2) + '\n')
   else {
     process.stdout.write(`Adoption preview (${plan.scope} scope)\n`)
+    process.stdout.write(`Mode: ${plan.mode}\n`)
     process.stdout.write(`Source: ${plan.source}\n`)
     process.stdout.write('Inventory:\n')
     for (const entry of plan.inventory) process.stdout.write(`  ${entry.kind}: ${entry.path}\n`)
@@ -62,7 +64,8 @@ async function adoptAgents(agents: string[], options: AgentCommandOptions): Prom
       for (const conflict of plan.conflicts) process.stdout.write(`  - ${conflict}\n`)
     }
     if (plan.canApply) {
-      process.stdout.write(`Apply this exact plan: sf agents adopt ${plan.requestedAgents.join(' ')} --scope ${plan.scope} --apply --plan ${plan.planId}\n`)
+      const mode = plan.mode === 'replace' ? ' --mode replace' : ''
+      process.stdout.write(`Apply this exact plan: sf agents adopt ${plan.requestedAgents.join(' ')} --scope ${plan.scope}${mode} --apply --plan ${plan.planId}\n`)
     } else process.stdout.write('This plan cannot be applied until its prerequisites and conflicts are resolved.\n')
   }
 }
@@ -96,7 +99,7 @@ async function doctorAgents(agents: string[], options: AgentCommandOptions): Pro
   if ([...report.checks, ...report.agents.flatMap((agent) => agent.checks)].some((check) => check.status === 'failed')) process.exitCode = 1
 }
 
-export async function agentsCommand(action: 'enable' | 'refresh' | 'list' | 'catalog' | 'adopt' | 'doctor', agents: string[] = [], options: AgentCommandOptions = {}): Promise<void> {
+export async function agentsCommand(action: 'enable' | 'replace' | 'refresh' | 'list' | 'catalog' | 'adopt' | 'doctor', agents: string[] = [], options: AgentCommandOptions = {}): Promise<void> {
   try {
     if (action === 'adopt') {
       await adoptAgents(agents, options)
@@ -127,7 +130,7 @@ export async function agentsCommand(action: 'enable' | 'refresh' | 'list' | 'cat
       return
     }
     const params = { targetPath: process.cwd(), scope: options.scope }
-    const result = action === 'enable' ? await enableAgents({ ...params, agents }) : await refreshAgents(params)
+    const result = action === 'enable' ? await enableAgents({ ...params, agents }) : action === 'replace' ? await replaceAgents({ ...params, agents }) : await refreshAgents(params)
     if (options.json) process.stdout.write(JSON.stringify(result, null, 2) + '\n')
     else {
       process.stdout.write(`Scope: ${options.scope ?? 'local'}\n`)
@@ -164,6 +167,7 @@ export function registerAgentCommands(command: Command): void {
     .option('--scope <scope>', 'Configuration scope: local (default) or shared', 'local')
     .option('--apply', 'Apply a previously reviewed adoption plan')
     .option('--plan <id>', 'Exact plan ID returned by the preview')
+    .option('--mode <mode>', 'Selection mode: add (default) or replace', 'add')
     .option('--json', 'Output only the machine-readable plan or result')
     .action((agents: string[], options: AgentCommandOptions) => agentsCommand('adopt', agents, options))
   command
@@ -178,6 +182,13 @@ export function registerAgentCommands(command: Command): void {
     .option('--scope <scope>', 'Configuration scope: local (default) or shared', 'local')
     .option('--json', 'Output a machine-readable report')
     .action((agents: string[], options: AgentCommandOptions) => agentsCommand('enable', agents, options))
+  command
+    .command('replace')
+    .description("Replace the selected scope's declared agents without deleting existing files")
+    .argument('<agents...>', getAgentIds().join(', '))
+    .option('--scope <scope>', 'Configuration scope: local (default) or shared', 'local')
+    .option('--json', 'Output a machine-readable report')
+    .action((agents: string[], options: AgentCommandOptions) => agentsCommand('replace', agents, options))
   command
     .command('refresh')
     .description('Refresh instructions in the selected scope')

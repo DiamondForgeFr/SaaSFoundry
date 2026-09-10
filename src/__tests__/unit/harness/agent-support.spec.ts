@@ -3,7 +3,7 @@ import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 
 import * as adapter from '../../../harness/agent-instructions'
-import { enableAgents, readAgentSupport, refreshAgents } from '../../../harness/agent-support'
+import { enableAgents, readAgentSupport, refreshAgents, replaceAgents } from '../../../harness/agent-support'
 
 const SKILL = '---\nname: commit\ndescription: Commit changes\n---\n# Commit\nFollow the project workflow.\n'
 const MANIFEST = {
@@ -24,6 +24,7 @@ describe('additive managed agent support (#660)', () => {
   const get = (path: string) => readFile(join(root, path), 'utf8')
   const manifest = async () => JSON.parse(await get('.saasfoundry.json'))
   const enable = (agents: string[]) => enableAgents({ targetPath: root, agents, scope: 'shared' })
+  const replace = (agents: string[]) => replaceAgents({ targetPath: root, agents, scope: 'shared' })
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'sf-agent-support-'))
     await put('.saasfoundry.json', JSON.stringify(MANIFEST, null, 4) + '\n')
@@ -56,6 +57,27 @@ describe('additive managed agent support (#660)', () => {
     const result = await enable(['claude-code'])
     expect(result.configuredAgents).toEqual(['claude-code', 'codex'])
     expect(await get('.claude/skills/sf-git-commit/SKILL.md')).toBe(SKILL)
+  })
+  it('adds Codex without reconciling an unrelated custom Gemini entrypoint', async () => {
+    await put('GEMINI.md', '# Personal Gemini instructions\n')
+
+    const result = await enable(['codex'])
+
+    expect(result.report.conflicts).toEqual([])
+    expect(result.sharedAgents).toEqual(['claude-code', 'codex'])
+    expect(await get('GEMINI.md')).toBe('# Personal Gemini instructions\n')
+    await expect(get('GEMINI.md.saasfoundry.new')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+  it('replaces only the shared declaration and retains prior generated adapters', async () => {
+    await enable(['gemini-cli'])
+    const gemini = await get('GEMINI.md')
+
+    const result = await replace(['kimi'])
+
+    expect(result.sharedAgents).toEqual(['kimi'])
+    expect(result.configuredAgents).toEqual(['kimi'])
+    expect((await manifest()).modules.harness.agents).toEqual(['kimi'])
+    expect(await get('GEMINI.md')).toBe(gemini)
   })
   it('does not rewrite manifests, skills or hooks on repeat enable or refresh', async () => {
     await enable(['codex', 'codex', 'kimi'])
@@ -116,7 +138,7 @@ describe('additive managed agent support (#660)', () => {
     await put('.saasfoundry.json', JSON.stringify({ version: '1', projectName: 'legacy', structure: 'cli' }))
     expect((await enable(['codex'])).configuredAgents).toEqual(['claude-code', 'codex'])
     expect((await manifest()).modules.harness.version).toBe(1)
-    expect(Object.keys((await manifest()).fileHashes).every((key) => key === 'AGENTS.md' || key.startsWith('.agents/'))).toBe(true)
+    expect(Object.keys((await manifest()).fileHashes).every((key) => ['AGENTS.md', 'GEMINI.md'].includes(key) || key.startsWith('.agents/'))).toBe(true)
   })
   it.each(['project', 'SHARED'])('refuses unsupported scope %s before changing files', async (scope) => {
     const before = await get('.saasfoundry.json')

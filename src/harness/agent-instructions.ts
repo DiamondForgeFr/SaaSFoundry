@@ -3,7 +3,7 @@ import { lstat, readFile, readdir } from 'fs/promises'
 import { join, posix, resolve } from 'path'
 
 import { safeWriteAgentFile } from './agent-file-writer'
-import { getAgentProfile } from './agent-registry'
+import { getAgentIds, getAgentProfile } from './agent-registry'
 import { HarnessAgent, skillsTemplatesPath } from '../types'
 import { hashFileContent } from '../utils'
 
@@ -85,6 +85,28 @@ or perform the role's work sequentially with the review limitation stated above.
 ${WORKTREE_ORCHESTRATION}
 `
 
+export const SELF_ONBOARDING_INSTRUCTIONS = `## Coding-agent identity and onboarding
+
+At session initialization, use the coding-agent identity explicitly supplied by the current
+host or session. Never infer an identity from a model or provider name, executable names,
+instruction files, repository contents or PATH. If the host identity is absent or ambiguous,
+ask the user to select one registered coding-agent profile and do not change the project.
+
+Run \`sf agents list --json\` and compare that explicit identity with the effective shared and
+local inventories. When a supported current agent is undeclared, report both inventories and
+ask the user to choose exactly one action: add the current agent, replace the declaration with
+an explicitly named non-empty set, or leave the project unchanged. A no-change decision runs
+no mutating command.
+
+Only after the user accepts add or replace, ask whether the declaration should be local to the
+current machine/worktree or shared through the repository. Use \`sf agents enable <agent>\` for
+an additive local change, \`sf agents enable <agent> --scope shared\` for an additive shared
+change, and \`sf agents replace <agents...> --scope <local|shared>\` for an exact declaration.
+Local onboarding must leave tracked files unchanged. Shared onboarding must produce reviewable
+repository changes. Replacing a declaration never authorizes deleting existing instructions,
+skills, hooks or settings.
+`
+
 export const COMMON_INSTRUCTIONS = `# SaaSFoundry agent instructions
 
 Read \`CLAUDE.md\` in this project before working: it remains the authoritative project
@@ -102,6 +124,8 @@ need a verified merge before Done, except for a validated \`nature:bundled-pr\` 
 commit ships in its non-Epic delivery parent's PR. An Epic has no PR: its first child entering
 In progress starts it, and it reaches Done only after every native child has board status Done.
 
+${SELF_ONBOARDING_INSTRUCTIONS}
+
 ${CAPABILITIES}`
 
 export const CODEX_SOURCE_CLAUDE_BRIDGE = `# SaaSFoundry Claude compatibility instructions
@@ -111,6 +135,8 @@ export const CODEX_SOURCE_CLAUDE_BRIDGE = `# SaaSFoundry Claude compatibility in
 Read \`AGENTS.md\` as the authoritative project instructions and follow every file it
 references. Claude Code must load applicable procedures manually from
 \`.agents/skills/*/SKILL.md\`; do not copy skills into \`.claude/skills\`.
+Follow the coding-agent identity and onboarding procedure in \`AGENTS.md\` before changing
+any declaration.
 
 ${CAPABILITIES}
 Do not copy or change agent settings, hooks, permissions, credentials, secrets or models.
@@ -127,6 +153,8 @@ asking about configured scope, tools or modules. Follow its output language and 
 Before a status transition, read the matching status document and execute the guarded CLI:
 \`.claude/skills/sf-workflow/workflow-cli.sh\`. Use its configured board tool and preserve
 all workflow guards, tests and approval requirements.
+
+${SELF_ONBOARDING_INSTRUCTIONS}
 
 ${CAPABILITIES}
 Do not copy or change agent settings, hooks, permissions, credentials, secrets or models.
@@ -346,6 +374,7 @@ export async function planAgentInstructions({ targetPath, agents, manifest, refe
   const report: AgentInstructionsReport = { written: [], unchanged: [], conflicts: [], warnings: [], fileHashes: {} }
   const plan: AgentInstructionPlan = { files: [], warnings: report.warnings }
   const profiles = [...new Set(agents)].map((agent) => getAgentProfile(agent))
+  const bootstrapProfiles = getAgentIds().map((agent) => getAgentProfile(agent))
   const inspected = await inspectInstructionFiles(targetPath)
   const instructionSource = inspected.report
   const effectiveReferenceOnly =
@@ -353,9 +382,8 @@ export async function planAgentInstructions({ targetPath, agents, manifest, refe
     inspected.referenceOnly ||
     manifest?.fileHashes?.['AGENTS.md'] === hashFileContent(ADOPTION_COMMON_INSTRUCTIONS) ||
     manifest?.fileHashes?.['CLAUDE.md'] === hashFileContent(CODEX_SOURCE_CLAUDE_BRIDGE)
-  const needsShared = profiles.some((profile) => profile.sharedInstructions)
+  const needsSharedSkills = profiles.some((profile) => profile.sharedInstructions)
   const needsClaudeBridge = instructionSource.source === 'codex' && profiles.some((profile) => profile.id === 'claude-code')
-  if (!needsShared && !needsClaudeBridge) return plan
   for (const profile of profiles) {
     const limitations =
       instructionSource.source === 'codex' && profile.id === 'claude-code' ? profile.limitations.filter((limitation) => !limitation.startsWith('Existing Claude instructions')) : profile.limitations
@@ -367,20 +395,45 @@ export async function planAgentInstructions({ targetPath, agents, manifest, refe
     report.warnings.push('CLAUDE.md and AGENTS.md are missing: deposit or author the project instructions before installing compatibility bridges.')
     return plan
   }
-  const wrappers = new Set(profiles.filter((profile) => profile.sharedInstructions && profile.instructionFile !== 'AGENTS.md').map((profile) => profile.instructionFile))
+  const wrappers = new Set(bootstrapProfiles.filter((profile) => profile.sharedInstructions && profile.instructionFile !== 'AGENTS.md').map((profile) => profile.instructionFile))
+  const wrapperContent = Buffer.from('# SaaSFoundry shared instructions\n\n@AGENTS.md\n')
+  const selectedWrappers = new Set(profiles.filter((profile) => profile.sharedInstructions && profile.instructionFile !== 'AGENTS.md').map((profile) => profile.instructionFile))
+  const wrapperFiles: AgentInstructionFile[] = []
+  for (const path of wrappers) {
+    let include = selectedWrappers.has(path)
+    if (!include) {
+      if (await hasLinkedAncestor(targetPath, path)) {
+        report.warnings.push(`${path}: existing undeclared entrypoint is linked and was preserved.`)
+        continue
+      }
+      try {
+        const stat = await lstat(join(targetPath, path))
+        if (stat.isFile()) {
+          const current = await readFile(join(targetPath, path))
+          include = current.equals(wrapperContent) || baselines[path] === hashBytes(current)
+        }
+        if (!include) report.warnings.push(`${path}: existing undeclared entrypoint was preserved; select its coding-agent profile before reconciling it.`)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') include = true
+        else throw error
+      }
+    }
+    if (include) wrapperFiles.push({ path, content: wrapperContent, mode: 0o644 })
+  }
+  // Bootstrap every registered discovery surface so an explicitly identified but
+  // undeclared host can read the consent flow. Only declared shared profiles get
+  // normalized skill copies below.
   if (instructionSource.source === 'codex') {
     if (needsClaudeBridge) plan.files.push({ path: 'CLAUDE.md', content: Buffer.from(CODEX_SOURCE_CLAUDE_BRIDGE), mode: 0o644 })
-    for (const path of wrappers) plan.files.push({ path, content: Buffer.from('# SaaSFoundry shared instructions\n\n@AGENTS.md\n'), mode: 0o644 })
+    plan.files.push(...wrapperFiles)
     return plan
   }
   if (instructionSource.source === 'mixed') {
     report.warnings.push('CLAUDE.md and AGENTS.md both contain custom instructions. Reconcile their authority manually; AGENTS.md will be reported as a normal conflict.')
   }
   plan.files.push({ path: 'AGENTS.md', content: Buffer.from(effectiveReferenceOnly ? ADOPTION_COMMON_INSTRUCTIONS : COMMON_INSTRUCTIONS), mode: 0o644 })
-  for (const path of wrappers) {
-    plan.files.push({ path, content: Buffer.from('# SaaSFoundry shared instructions\n\n@AGENTS.md\n'), mode: 0o644 })
-  }
-  if (effectiveReferenceOnly) return plan
+  plan.files.push(...wrapperFiles)
+  if (effectiveReferenceOnly || !needsSharedSkills) return plan
   const source = '.claude/skills'
   if (await hasLinkedAncestor(targetPath, source)) {
     report.warnings.push(`${source}: symbolic link source skipped; use regular installed harness files.`)

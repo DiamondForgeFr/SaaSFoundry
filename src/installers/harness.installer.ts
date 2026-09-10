@@ -94,7 +94,7 @@ export interface InstallHarnessParams {
   mainBranch?: string
   workflow?: WorkflowConfig
   advancedSkills?: string[]
-  /** Additive instruction adapters. Omission preserves the legacy Claude installation. */
+  /** Declared coding-agent adapters. Omission keeps the legacy Claude declaration. */
   agents?: HarnessAgent[]
 }
 
@@ -192,9 +192,10 @@ export async function installHarness({
     await writeFile(claudeMdPath, content)
   }
 
-  if (agents) {
-    return addAgentInstructions(targetPath, agents)
-  }
+  // Universal bootstrap entrypoints let an explicitly identified but undeclared
+  // host reach the consent flow. Skill copies remain limited to the declared
+  // profiles; omission retains the legacy Claude-only declaration.
+  return addAgentInstructions(targetPath, agents ?? ['claude-code'])
 }
 
 async function addAgentInstructions(targetPath: string, agents: HarnessAgent[]): Promise<AgentInstructionsReport> {

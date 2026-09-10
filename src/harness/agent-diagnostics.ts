@@ -73,6 +73,7 @@ const ARTIFACTS: Record<HarnessAgent, AgentArtifacts> = {
 
 const INITIALIZATION = [
   'Start a fresh session at the project root. Read the selected instruction file and all its references, then .saasfoundry.json for workflow, SRS and language. Verify what the host loaded; file presence alone is not native discovery.',
+  'Use only a coding-agent identity explicitly supplied by the current host or session. Never infer identity from model/provider names, binaries, files or PATH. If a supported identified host is absent from `sf agents list --json`, ask for add, exact replace, or no change; ask local versus shared scope only after add or replace is accepted. Diagnostics do not verify identity or onboarding authorization.',
   'Run `sf status --agent-friendly --no-network` and resolve its failing preconditions before work. Its hook-compatible exit code is zero even when checks fail; read the report. The legacy --claude-friendly alias remains supported.',
   'Read applicable SKILL.md procedures explicitly when native discovery is not verified. Reference-only adoption may retain the original skill directory; do not copy or replace custom skills to satisfy a missing-directory check.',
   'Before a workflow transition, read the matching sf-workflow status document and use the existing guarded workflow CLI selected by project instructions. Known locations are .claude/skills/sf-workflow/workflow-cli.sh and .agents/skills/sf-workflow/workflow-cli.sh. Resolve missing scripts with `sf workflow`, never direct board mutations.',
@@ -458,7 +459,7 @@ function registrationChecks(agent: HarnessAgent, manifest: ManifestEvidence): Di
       id: 'registration.shared',
       status: 'unavailable',
       summary: `${agent} is not registered in the explicit shared manifest inventory.`,
-      remediation: `Run \`sf agents enable ${agent} --scope shared\` if shared project support is intended.`
+      remediation: `After explicit user authorization, run \`sf agents enable ${agent} --scope shared\` to add it or \`sf agents replace <agents...> --scope shared\` to set the exact shared declaration.`
     }
   }
   return [

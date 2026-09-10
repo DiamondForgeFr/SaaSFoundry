@@ -53,9 +53,10 @@ describe('compiled sf agents commands', () => {
     ['enable', 'codex', '--scope', 'shared', '--unknown']
   ])('rejects invalid input or local setup without Git before depositing files: %j', async (...args: string[]) => {
     const manifest = await readFile(join(project, '.saasfoundry.json'), 'utf8')
+    const agentsInstructions = await readFile(join(project, 'AGENTS.md'), 'utf8')
     expect(run(...args).status).not.toBe(0)
     expect(await readFile(join(project, '.saasfoundry.json'), 'utf8')).toBe(manifest)
-    await expect(readFile(join(project, 'AGENTS.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(project, 'AGENTS.md'), 'utf8')).toBe(agentsInstructions)
   })
   it('reports a customized destination as a conflict instead of claiming successful activation', async () => {
     await writeFile(join(project, 'AGENTS.md'), '# Personal agent instructions\n')
@@ -94,7 +95,8 @@ describe('compiled sf agents commands', () => {
     expect(git('symbolic-ref', 'HEAD')).toBe(branch)
     expect(run('refresh').status).toBe(0)
     expect(run('enable', 'codex', '--scope', 'shared').status).toBe(0)
-    expect(git('status', '--porcelain', '--untracked-files=all')).toContain('AGENTS.md')
+    expect(git('status', '--porcelain', '--untracked-files=all')).toContain('.agents/skills/')
+    expect(git('status', '--porcelain', '--untracked-files=all')).toContain('.saasfoundry.json')
     expect(JSON.parse(run('list', '--json').stdout).sharedAgents).toContain('codex')
     git('add', '.')
     git('-c', 'user.name=Agent tests', '-c', 'user.email=agents@example.test', 'commit', '-qm', 'Share agent support')
@@ -109,6 +111,31 @@ describe('compiled sf agents commands', () => {
     } finally {
       await rm(clone, { recursive: true, force: true })
     }
+  })
+  it('replaces the local declaration while preserving private adapter artifacts', async () => {
+    initializeGit()
+    expect(run('enable', 'gemini-cli', '--json').status).toBe(0)
+
+    const result = run('replace', 'codex', '--json')
+
+    expect(result.status).toBe(0)
+    const inventory = JSON.parse(run('list', '--json').stdout)
+    expect(inventory.localAgents).toEqual(['codex'])
+    expect(inventory.configuredAgents).toEqual(['claude-code', 'codex'])
+    expect(git('status', '--porcelain')).toBe('')
+    expect(run('refresh').status).toBe(0)
+    expect(git('status', '--porcelain')).toBe('')
+  })
+  it('replaces the shared declaration without deleting prior generated adapters', async () => {
+    expect(run('enable', 'gemini-cli', '--scope', 'shared').status).toBe(0)
+    const gemini = await readFile(join(project, 'GEMINI.md'), 'utf8')
+
+    const result = run('replace', 'kimi', '--scope', 'shared', '--json')
+
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout).sharedAgents).toEqual(['kimi'])
+    expect(JSON.parse(await readFile(join(project, '.saasfoundry.json'), 'utf8')).modules.harness.agents).toEqual(['kimi'])
+    expect(await readFile(join(project, 'GEMINI.md'), 'utf8')).toBe(gemini)
   })
   it('refuses a tracked instruction conflict before changing any project file', async () => {
     await writeFile(join(project, 'AGENTS.md'), '# Team rules\n')
@@ -136,6 +163,7 @@ describe('compiled sf agents commands', () => {
     }
   })
   it('lists the versioned catalog without requiring a managed project or writing files', async () => {
+    const agentsInstructions = await readFile(join(project, 'AGENTS.md'), 'utf8')
     await rm(join(project, '.saasfoundry.json'))
     const result = run('catalog', '--json')
     expect(result.status).toBe(0)
@@ -144,7 +172,7 @@ describe('compiled sf agents commands', () => {
     expect(catalog.runtime).toBe('not-checked')
     expect(catalog.profiles.map((profile: { id: string }) => profile.id)).toEqual(expect.arrayContaining(['gemini-cli', 'qwen-code', 'generic']))
     expect(catalog.profiles.every((profile: { runtime: string }) => profile.runtime === 'not-checked')).toBe(true)
-    await expect(readFile(join(project, 'AGENTS.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(project, 'AGENTS.md'), 'utf8')).toBe(agentsInstructions)
   })
   it('enables registry profiles without coupling instructions to a model or provider', async () => {
     for (const agent of ['gemini-cli', 'qwen-code', 'generic']) {

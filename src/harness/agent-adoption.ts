@@ -3,7 +3,7 @@ import { lstat, readFile, readdir } from 'fs/promises'
 import { join, resolve } from 'path'
 
 import { inspectInstructionSource, AgentInstructionPlan } from './agent-instructions'
-import { enableAgents, AgentSupportResult } from './agent-support'
+import { enableAgents, replaceAgents, AgentSupportResult, AgentSelectionMode } from './agent-support'
 import { getAgentIds, isHarnessAgent } from './agent-registry'
 import type { HarnessAgent } from '../types'
 
@@ -11,6 +11,7 @@ export interface AgentAdoptionPlan {
   version: 1
   planId: string
   scope: 'local' | 'shared'
+  mode: AgentSelectionMode
   requestedAgents: HarnessAgent[]
   source: string
   inventory: { path: string; kind: string }[]
@@ -24,6 +25,7 @@ interface AdoptionParams {
   targetPath: string
   agents: string[]
   scope?: string
+  mode?: string
 }
 const digest = (value: Buffer | string) => createHash('sha256').update(value).digest('hex')
 const knownPaths = [
@@ -70,12 +72,15 @@ async function buildAdoptionPlan(params: AdoptionParams, capture?: (plan: AgentI
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error('Adoption requires a regular project directory.')
   if (!params.agents.length || params.agents.some((agent) => !isHarnessAgent(agent))) throw new Error(`Choose coding agents from the registered tool profiles: ${getAgentIds().join(', ')}.`)
   if (params.scope !== undefined && !['local', 'shared'].includes(params.scope)) throw new Error('Agent scope must be local (default) or shared.')
+  if (params.mode !== undefined && !['add', 'replace'].includes(params.mode)) throw new Error('Agent selection mode must be add (default) or replace.')
   const requestedAgents = getAgentIds().filter((agent) => params.agents.includes(agent))
   const scope = params.scope === 'shared' ? 'shared' : 'local'
+  const mode: AgentSelectionMode = params.mode === 'replace' ? 'replace' : 'add'
   const plan: AgentAdoptionPlan = {
     version: 1,
     planId: '',
     scope,
+    mode,
     requestedAgents,
     source: 'missing',
     inventory: [],
@@ -109,7 +114,8 @@ async function buildAdoptionPlan(params: AdoptionParams, capture?: (plan: AgentI
     if (!((await kind(root, '.saasfoundry.json')) === 'file')) {
       plan.prerequisites.push('A valid existing .saasfoundry.json is required to apply. Configure the project with sf workflow first; adoption does not invent workflow or SRS settings.')
     } else if (source.source !== 'missing') {
-      const preview = await enableAgents({ targetPath: root, agents: requestedAgents, scope, preview: true, adoption: true })
+      const reconcile = mode === 'replace' ? replaceAgents : enableAgents
+      const preview = await reconcile({ targetPath: root, agents: requestedAgents, scope, preview: true, adoption: true })
       plan.conflicts.push(...preview.report.conflicts)
       plan.warnings.push(...preview.report.warnings)
       evidence.push(preview.fingerprint)
@@ -152,5 +158,6 @@ export async function applyAgentAdoption(params: AdoptionParams & { planId: stri
     return captured
   }
   await verify()
-  return enableAgents({ targetPath: params.targetPath, agents: params.agents, scope: params.scope, adoption: true, verify })
+  const reconcile = params.mode === 'replace' ? replaceAgents : enableAgents
+  return reconcile({ targetPath: params.targetPath, agents: params.agents, scope: params.scope, adoption: true, verify })
 }
