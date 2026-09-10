@@ -1,0 +1,54 @@
+{
+  "_comment": "feature -> version -> FR in one write-srs run. The order matters: a page can only reference a logical id declared before it in the batch.",
+  "candidates": [
+    {
+      "kind": "epic",
+      "confidence": "high",
+      "source": { "kind": "notion-pages" },
+      "epic": {
+        "id": "FEAT-LIVE",
+        "title": "Réunion live : transcript & notes",
+        "parentPageId": "<srs-root-page-id>",
+        "businessValue": "A participant follows a meeting without taking notes by hand, and leaves with a usable record of it.",
+        "urs": [],
+        "frs": []
+      }
+    },
+    {
+      "_comment": "A version. `parentId` is what makes it one — position decides the level, never the title. Call it MVP, V1 or 'v2 — Titre'; the tooling reads where it sits.",
+      "kind": "epic",
+      "confidence": "high",
+      "source": { "kind": "notion-pages" },
+      "epic": {
+        "id": "LIVE-V2",
+        "parentId": "FEAT-LIVE",
+        "title": "v2 — Prise de notes vivante",
+        "parentPageId": "<resolved-from-parentId>",
+        "version": {
+          "changes": ["Notes are grouped by topic rather than appended chronologically.", "A foreign-language passage is summarised in the meeting's language."]
+        },
+        "urs": [],
+        "frs": [
+          { "id": "FR-LIVE-007", "title": "Topic-aware AI note taking", "priority": "P1" },
+          { "id": "FR-LIVE-008", "title": "Per-topic consolidation", "priority": "P2" }
+        ]
+      }
+    },
+    {
+      "_comment": "FRs attach to the VERSION, never to the feature. An FR pointing at FEAT-LIVE here is refused: Epic = feature + version.",
+      "kind": "fr",
+      "confidence": "high",
+      "source": { "kind": "notion-pages" },
+      "fr": {
+        "parentEpicId": "LIVE-V2",
+        "fr": {
+          "id": "FR-LIVE-007",
+          "title": "Topic-aware AI note taking",
+          "description": "Live notes are grouped under the topic being discussed rather than appended in order of arrival.",
+          "priority": "P1",
+          "acceptanceCriteria": ["A topic change creates a new group.", "A note arriving after a topic change lands under the new topic."]
+        }
+      }
+    }
+  ]
+}

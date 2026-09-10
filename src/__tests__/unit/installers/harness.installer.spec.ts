@@ -111,6 +111,7 @@ describe('harness installer', () => {
 
       const instructions = await readFile(join(dir, 'AGENTS.md'), 'utf8')
       expect(instructions).toContain('CLAUDE.md')
+      expect(await readFile(join(dir, 'CLAUDE.md'), 'utf8')).toContain('Coding-agent identity and onboarding')
       for (const root of ['.claude', '.agents']) {
         expect(await fileExists(join(dir, root, 'skills', 'sf-workflow', 'SKILL.md'))).toBe(true)
         expect(await fileExists(join(dir, root, 'skills', 'sf-tool-github-projects', 'github-projects-cli.sh'))).toBe(true)

@@ -12,6 +12,15 @@ Before asking the user anything about scope, backend, or module choices, **read 
 3. Only surface scope questions for things that are **not** resolvable from the manifest (e.g. genuine product decisions). If a precondition is `fail`, route the user to the relevant install/config
    CLI (`sf workflow`, `sf skill install`, etc.) instead of asking scope questions.
 
+## Coding-agent identity and onboarding
+
+Use the coding-agent identity explicitly supplied by the current host or session. Never infer it from a model/provider name, executable, repository file, or PATH. If the identity is absent or
+ambiguous, ask the user to choose a registered coding-agent profile and do not change the project.
+
+Run `sf agents list --json`. When the current supported tool is undeclared, ask the user to choose one action: add it, replace the declaration with an explicitly named non-empty set, or leave the
+project unchanged. Ask whether the choice is local to this checkout or shared through the repository only after add or replace is accepted. Use `sf agents enable` for add and `sf agents replace` for
+exact replacement. No change runs no mutating command. Replacement changes inventory only and never deletes existing instructions, skills, hooks, settings, credentials, or exclusions.
+
 This rule exists because AI sessions historically asked users to re-pick the SRS backend (notion/atlassian/local-markdown) and parent page even though both were already in the manifest — those answers
 must come from `.saasfoundry.json`, not from a fresh dialogue.
 

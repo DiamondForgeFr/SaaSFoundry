@@ -8,15 +8,21 @@ sf agents enable kimi --scope local
 sf agents refresh
 sf agents list --json
 sf agents enable codex --scope shared
+sf agents replace claude-code codex --scope shared
 sf agents catalog --json
 sf agents adopt codex claude-code --scope shared
+# Replace the declaration after reviewing a repository-adoption preview:
+sf agents adopt claude-code codex --mode replace --scope shared
 # Review the preview, then apply that exact plan:
-sf agents adopt codex claude-code --scope shared --apply --plan <plan-id>
+sf agents adopt claude-code codex --mode replace --scope shared --apply --plan <plan-id>
 ```
 
 ## Scope and prerequisites
 
 A managed project has `.saasfoundry.json`, `CLAUDE.md` and `.claude/skills`. Use `sf agents catalog` for registered tool identifiers; model names are not agent profiles.
+
+Fresh harnesses also receive universal `AGENTS.md` and `GEMINI.md` onboarding entrypoints. Their presence does not declare Codex or Gemini: the manifest and checkout-local inventory do. A custom
+entrypoint belonging to an undeclared tool is preserved and does not block enabling a different profile.
 
 **Local is the default.** Run at the root of a non-bare Git checkout. Local setup writes registered discovery files (including `AGENTS.md` and Gemini’s `GEMINI.md`) and `.agents/skills` files while
 storing the personal inventory and successful baselines inside the checkout's Git directory. It leaves tracked files, the index, branch and shared manifest unchanged. If a tracked destination needs
@@ -35,13 +41,14 @@ runtimes or probe their native discovery behavior.
 
 ## Commands
 
-| Command                                      | Behavior                                                                             |
-| -------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `adopt <agents...> [--scope local\|shared]`  | Plans by default; applies only with `--apply --plan <id>`.                           |
-| `enable <agents...> [--scope local\|shared]` | Adds support in the selected scope; defaults to local.                               |
-| `refresh [--scope local\|shared]`            | Refreshes instructions in that scope; defaults to local.                             |
-| `list`                                       | Reports shared, local and effective agents plus discovered files.                    |
-| `doctor [agents...]`                         | Diagnoses artifact evidence and unverified host capabilities without changing files. |
+| Command                                       | Behavior                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `adopt <agents...> [--scope local\|shared]`   | Plans by default; applies only with `--apply --plan <id>`.                           |
+| `enable <agents...> [--scope local\|shared]`  | Adds support in the selected scope; defaults to local.                               |
+| `replace <agents...> [--scope local\|shared]` | Makes that scope's declaration exactly the named non-empty set; preserves files.     |
+| `refresh [--scope local\|shared]`             | Refreshes instructions in that scope; defaults to local.                             |
+| `list`                                        | Reports shared, local and effective agents plus discovered files.                    |
+| `doctor [agents...]`                          | Diagnoses artifact evidence and unverified host capabilities without changing files. |
 
 All commands accept `--json`. `list` is read-only and reports runtime discovery as `not-checked`.
 
@@ -76,8 +83,19 @@ A repository with only `AGENTS.md` can be adopted for Codex without fabricating 
 If both Claude and portable instruction roots contain custom content, adoption reports a conflict and does not silently choose precedence. Original instruction files remain user-owned; only exact
 generated wrappers receive managed baselines.
 
-Adoption is additive. There is no automatic removal command: removing an adapter is a separate deliberate operation because user edits, shared history, and local exclusions must be evaluated at that
-time.
+Adoption uses additive mode by default. `--mode replace` makes the selected scope's declaration exactly the reviewed non-empty set. It changes inventory only: existing instructions, skill copies,
+hooks, settings, and local exclusions are retained rather than deleted. The mode contributes to the plan ID, so an additive preview cannot authorize a replacement.
+
+## Session onboarding for an undeclared tool
+
+The current host supplies its coding-tool identity. Do not infer it from a model/provider name, executable, repository file, or PATH. If the host does not provide an unambiguous identity, choose a
+registered profile with the user before changing the project.
+
+At initialization, run `sf agents list --json`. When the current supported tool is absent from both the shared and checkout-local inventories, present three choices: add the tool, replace the
+declaration with an explicitly named non-empty set, or leave the project unchanged. Ask for `local` or `shared` scope only after add or replace is chosen. The no-change path runs no mutating command.
+
+Use `sf agents enable <tool>` for add and `sf agents replace <tools...>` for exact replacement. Local scope remains private to the checkout; `--scope shared` creates a reviewable repository diff.
+Neither operation installs a runtime or changes private model/provider credentials. Replacement never authorizes deletion of existing adapter files.
 
 ## Diagnosing agent capabilities
 

@@ -90,5 +90,55 @@
         "exclude": ["scaffolds/", "docs/", ".claude/", ".srs-audit/"]
       }
     }
+  },
+  "modules": {
+    "harness": {
+      "version": 1,
+      "agents": ["claude-code", "codex"]
+    }
+  },
+  "fileHashes": {
+    "AGENTS.md": "bce6d229fa0d69ed4b5acd14f7fecb89a46d5e636dd56a4163ba768b7f7c38e3",
+    "GEMINI.md": "bc151271e752fb7d81079960549699344f07dc69c33508d296d888987a34b8f9",
+    ".agents/skills/sf-integration-rules/backend.md": "e3444b0f38762686070b7cf88eaec7a92b4bae320d0ebf33a39191833f9e5739",
+    ".agents/skills/sf-integration-rules/frontend.md": "4e4b63e24fe00e075e55c6cb430683cb3dfa18d99abc4cce693fb90cd32c90fc",
+    ".agents/skills/sf-integration-rules/SKILL.md": "9468c2b7117b0f1457e18513c7c65b8ecfeda03b7e52bb055aaaa06ddace9898",
+    ".agents/skills/sf-integration-rules/topology.md": "fa43b6840bb8dd8822b27002c2320f0c3a9b5b2dca2ef37c2732e14502903b00",
+    ".agents/skills/sf-srs/data/clustering-rules.json": "3110294b18bf3229a320ea70f5878d18c1e874b8bbc511e61ee0c948dcf0bfee",
+    ".agents/skills/sf-srs/scripts/detect-eval-signals.sh": "66dff12ed1bb9ffb0e961df566170eabe82e624a306855687baa3568e2224f99",
+    ".agents/skills/sf-srs/scripts/srs-cli.sh": "5f8ab1cf82fec8f09d546ece2635e108f6cbe50c9ab4c847b06a62e10d1dd994",
+    ".agents/skills/sf-srs/SKILL.md": "b26a953d6bab8da11aeb280346c72355ec99c8cc234d2d8864f93f2ad573adb5",
+    ".agents/skills/sf-srs/templates/examples/example-epic.md": "e15fb18ee92bd9515e9dc899ba6e0e59668ecbba796e7755f321e21061ff1f46",
+    ".agents/skills/sf-srs/templates/examples/example-epic.spec.json": "028ec65c05b42717ad94ef207263754625431ad3ce2b482d0439dd994acbc52d",
+    ".agents/skills/sf-srs/templates/examples/example-three-levels.spec.json": "f3cf233b768bda917393d77887562177d150cbb86a0d1160f5af30a5a2792d8a",
+    ".agents/skills/sf-srs/templates/pages/README.md": "26193f29c06dab58f4f8cec209bb2efaefbc2b824b5474714f32c8dc07280011",
+    ".agents/skills/sf-srs/templates/tickets/examples/epic.md": "b6c842ae45690513a552b3e1d7f49e5b51e12c30ea7a854748ef2807a99478c3",
+    ".agents/skills/sf-srs/templates/tickets/examples/issue.md": "94a670bcf7b3124026b3515dc96d0abc2f4801e8294fc0229bbcbfe815623cdd",
+    ".agents/skills/sf-srs/templates/tickets/examples/story.md": "b061472b1540b1342f3424b777a0ddb5849ce1e62d2544627645a07e2f7a301f",
+    ".agents/skills/sf-srs/templates/tickets/examples/task.md": "d3e00d8872d580137055917cce2729d1100a36e5cc9e655b0612333ea84c6364",
+    ".agents/skills/sf-srs/templates/tickets/README.md": "86a02da6116ff743c16415bfe0288abf46cd67a7b3424571a245a693768f873f",
+    ".agents/skills/sf-tool-github-projects/github-projects-cli.sh": "f7ab43de220ddd9fcada95f477647b91877f5054eb1e2e267197f97be8be2bec",
+    ".agents/skills/sf-tool-github-projects/SKILL.md": "6c2b0cf04f83ae93b73137df14ae95a64b2f0a3824665f999d7e50d0c2a86835",
+    ".agents/skills/sf-workflow/complexity/bug.yml": "9a45279f1c34c556f57a771fa7f954ad85299e1779aa6babcd7a35e060e4cb0a",
+    ".agents/skills/sf-workflow/complexity/complex.yml": "19270133595866103f86fc0343fea1f8f0509c0ad6a1ebbb67edfff77546668c",
+    ".agents/skills/sf-workflow/complexity/low.yml": "c929f225b7749343bbc267b6cb15f0a20680ad5fd86947b16d0439baebc64ab3",
+    ".agents/skills/sf-workflow/complexity/medium.yml": "1f55ae405bb401554ec73b243507c0d8863749c444c48635701aa303e02012e9",
+    ".agents/skills/sf-workflow/complexity/README.md": "056402b500d019ac749d5854cc4e326f5535a45a50a8c38edfcafd0012524acb",
+    ".agents/skills/sf-workflow/scripts/analyze.sh": "7f9e85453016150438d3db373b33fbe4757806924728349aaabc81f6e1e6638e",
+    ".agents/skills/sf-workflow/scripts/detect-complexity.sh": "fe3e1b3b572e92124059615f6297104b05cdccfe5031ce76678ed82129becb51",
+    ".agents/skills/sf-workflow/scripts/examine.sh": "53fed75872441a632570c003d70682019c37c8ab72d47498881ddbad5231707d",
+    ".agents/skills/sf-workflow/scripts/plan.sh": "5794237b6c17cdb4eac82cd8435fd6922694ea3856185a62989e5172f7eb6d2f",
+    ".agents/skills/sf-workflow/SKILL.md": "a162847723746793ba1f58565c5e23acdd9c9ff6d1aacc63a0907898b19d7b41",
+    ".agents/skills/sf-workflow/statuses/1-backlog.md": "1f1d252421fb353ec955a624cd13389b7b7fc069e41c39ae4f4538a8268079b1",
+    ".agents/skills/sf-workflow/statuses/2-ready.md": "cc67916a7cdedd0c8f8bb6184848b3ad5daa8cc87c146d2a1ab4f50d9c161137",
+    ".agents/skills/sf-workflow/statuses/3-in-progress.md": "91f6103bfca390cd1f22377b41dc372564ffdec89afd4dc9afc641b872fa0ccf",
+    ".agents/skills/sf-workflow/statuses/3a-ai-drafting.md": "ab6bc2e19150fd4280910a1ba8660dd5de16f719b4fb92426019a93039463ac7",
+    ".agents/skills/sf-workflow/statuses/3b-human-review.md": "54616cd2dc8e4d728e5e37a7c5d21f80c07ab01426ab5acd29137d94da86b07a",
+    ".agents/skills/sf-workflow/statuses/3c-spawning.md": "21c302fdfbf50ebc0dca5e4d94b8b7d16d11a14eb7ea9a9508bd4bc62b18b168",
+    ".agents/skills/sf-workflow/statuses/4-ai-testing.md": "50ea0f3893b03606f21d1b17f4985a55e07f243b24fdd582c740596e08426757",
+    ".agents/skills/sf-workflow/statuses/5-human-testing.md": "3b99530974d8fa72f4578c31f037565e4e9be882f0471cc14854e67162c5e42a",
+    ".agents/skills/sf-workflow/statuses/6-in-review.md": "45ef602930b687818f4b32f1ed1544bf152a7115ad0d87c8ee7a27c5c83a1ec5",
+    ".agents/skills/sf-workflow/statuses/7-done.md": "998216a270f6c80bb530c5c3d58e41bad05680b174c2477da36afdb11ce5e3fc",
+    ".agents/skills/sf-workflow/workflow-cli.sh": "77e55755ba43dd1755648a30af28088dceb2a04a7852c3dc0869814d61ee1faf"
   }
 }

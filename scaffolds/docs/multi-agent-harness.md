@@ -8,7 +8,20 @@ This foundation exposes an installer API and additive `sf agents` commands for m
 `sf agents adopt <agents...>`, which previews a bounded adoption plan without writing and applies only with the exact returned plan ID. `sf agents doctor [agents...]` diagnoses local artifacts and
 distinguishes them from unverified host capabilities. The full compatibility matrix is tracked by #651.
 
-For a newly generated harness, `installHarness` accepts an optional `agents` array with `claude-code`, `codex`, and `kimi`. Omitting it preserves existing installation behavior. For an existing harness, `installAgentInstructions` adds the instruction surfaces without reinstalling its legacy files.
+For a newly generated harness, `sf new` asks which registered coding tools to support and accepts `--agents claude-code,codex` in scripted runs. Omitting the flag preserves the legacy implicit Claude
+Code declaration. This declaration selects tool entrypoints only; private model/provider settings, credentials, plugins, MCP configuration, and host permissions stay outside the repository. For an
+existing harness, `installAgentInstructions` adds the instruction surfaces without reinstalling its legacy files.
+
+Universal `AGENTS.md` and `GEMINI.md` bootstrap entrypoints are deposited even when their tools are not declared. They expose the consent flow to a newly arriving supported host; the manifest
+inventory and declared profiles still determine active support and shared skill copies. A custom entrypoint owned by an undeclared tool is preserved and does not block onboarding another tool.
+
+Every generated universal entrypoint contains the same onboarding contract. The host supplies its coding-tool identity; the agent never infers identity from a model/provider, executable, project
+files, or PATH. If that tool is undeclared, inspect `sf agents list --json` and let the user choose add, exact replacement with a named non-empty set, or no change. Ask for local versus shared scope
+only after a mutation is chosen. Use `sf agents enable` for add and `sf agents replace` for exact replacement. No change performs no write, and replacement retains existing instruction, skill, hook,
+settings, and exclusion files.
+
+In a multirepo project, the API and web repositories each receive a minimal `structure: cli` manifest plus their own agent entrypoints. They can run `sf status` and `sf agents` independently. The
+outer multirepo manifest alone remains responsible for regenerating the technical stack.
 
 For managed Claude-first harnesses, the existing `CLAUDE.md` remains the source of project instructions. Generated `AGENTS.md` directs portable agents to read it. A Codex-only repository may instead
 retain its original `AGENTS.md` as the source and does not need `.claude/skills`; requesting Claude may add a small reference when the plan can do so without replacing custom instructions. Portable
@@ -75,8 +88,8 @@ state from a full installation. An existing harness version is preserved.
 
 Adoption adds reference wrappers without copying skill/script contents, including recognized package paths that may contain customized credentials. The wrappers refer to existing custom and bundled procedures for explicit reading; later agent refreshes retain this reference-only policy.
 
-Adoption does not move source files and needs no numbered migration. It is additive and has no automatic removal path; removing an adapter is a separate deliberate operation that must account for
-user edits and repository history.
+Adoption does not move source files and needs no numbered migration. It adds by default; `--mode replace` changes only the selected scope's exact declaration after the corresponding preview is
+reviewed. Existing adapter artifacts remain in place so user edits and repository history are preserved.
 
 ## Extensible tool profiles
 

@@ -13,6 +13,7 @@ sf new [options]
 | Flag                                           | Description                                                     | Default |
 | ---------------------------------------------- | --------------------------------------------------------------- | ------- |
 | `--profile <profile>`                          | What to install: `full`, `harness`, or `stack`                  | `full`  |
+| `--agents <agents>`                            | Comma-separated coding tools to support in the harness          | Claude¹ |
 | `--non-interactive`                            | Fail if any required value is missing instead of prompting      | -       |
 | `--project-name <name>`                        | Project name (kebab-case)                                       | -       |
 | `--project-description <description>`          | Project description                                             | -       |
@@ -74,6 +75,17 @@ installable app) are skipped entirely, because there is nothing to scaffold.
 
 In `--non-interactive` mode the profile defaults to `full`, so existing flag-driven invocations keep behaving as they did before profiles existed.
 
+For `full` and `harness`, the interactive flow asks which coding tools should share the harness immediately after the profile. The registered IDs are `claude-code`, `codex`, `kimi`, `gemini-cli`,
+`qwen-code`, and `generic`. The CLI trims and deduplicates a comma-separated `--agents` value and rejects unknown IDs. These are tool hosts, not model or provider names; model credentials and routing
+stay in each developer's host configuration.
+
+In scripted runs, omitting `--agents` preserves the historical implicit Claude Code declaration. The `stack` profile skips agent selection. A multirepo scaffold writes an independent harness manifest
+and bootstrap entrypoints into both application repositories; the outer manifest remains the stack-generation coordinator. `AGENTS.md` and `GEMINI.md` are universal onboarding surfaces even when their
+tools are not declared, so a newly arriving supported host can request consent. The declaration controls the effective inventory and shared skill copies. An unrelated custom entrypoint for an
+undeclared tool is preserved and does not block another tool's onboarding.
+
+¹ Legacy fallback when `--agents` is omitted. An explicit value is stored in `modules.harness.agents`.
+
 ## Examples
 
 ```bash
@@ -85,6 +97,7 @@ sf new
 # Scripted scaffold (monorepo, postgres via docker, no analytics)
 sf new --non-interactive \
   --project-name my-saas \
+  --agents claude-code,codex \
   --structure monorepo \
   --setup-repo local \
   --db-setup docker \

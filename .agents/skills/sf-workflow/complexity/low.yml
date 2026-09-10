@@ -1,0 +1,73 @@
+name: low
+label: "🟢 Low Complexity"
+description: "Simple task, oneshot-style implementation"
+
+# Status workflow
+skipStatuses: []  # All statuses
+
+# Steps configuration
+steps:
+  analyze:
+    enabled: true
+    depth: "minimal"  # 2-3 files max
+    agents: 0  # No parallel agents, direct tools only
+  plan:
+    enabled: true
+    depth: "minimal"  # Quick mental plan, no formal doc
+    approval: false  # No approval needed
+  subtasks:
+    enabled: false  # Optional, auto-create if >3 files
+    mandatory: false
+    threshold: 3  # Create subtasks if >3 files impacted
+  examine:
+    enabled: false  # No adversarial review
+  tests:
+    type: "optional"
+    mandatory: false
+
+# Test requirements
+testing:
+  unit: false  # Optional
+  e2e: false  # Optional
+  regression: false  # Optional
+  coverage: null
+
+# AI guidance for this complexity level
+aiInstructions: |
+  This is a low-complexity task. Move fast (oneshot-style):
+
+  **Analyze Phase (MINIMAL):**
+  - Use Glob/Grep directly (no subagents)
+  - Find 2-3 key files
+  - Quick pattern discovery
+  - NO exploration tours - find examples and move on
+
+  **Plan Phase (MINIMAL):**
+  - Quick mental plan
+  - No formal documentation
+  - Identify what needs to change
+
+  **Execute Phase:**
+  - Direct implementation
+  - Follow existing patterns
+  - Clear variable names over comments
+  - Stay STRICTLY in scope
+  - NO refactoring beyond requirements
+
+  **Validate Phase:**
+  - Lint + typecheck only
+  - No full test suite
+  - Fix only what you broke
+
+  **Examine Phase (SKIP):**
+  - No adversarial review
+
+  **Tests Phase (OPTIONAL):**
+  - Tests optional (inform dev if skipped)
+  - No E2E unless requested
+
+  **Output:**
+  When complete, concise summary:
+  - Task: {what was implemented}
+  - Files changed: {list}
+  - Validation: ✓ lint ✓ typecheck

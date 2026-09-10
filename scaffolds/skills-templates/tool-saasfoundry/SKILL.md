@@ -333,7 +333,7 @@ Full specification: `reference/new-flags.json`. Essentials:
 
 - **Always required:** `projectName` (kebab-case), `structure` (`monorepo` | `multirepo`)
 - **Recommended to set explicitly:** `mainBranch`, `dbSetup`, `emailService`, `analytics`
-- **Only set when user opts in:** `advancedSkills` (CSV of `context7`, `atlassian`, `notion`, `figma`) and their credential fields
+- **Only set when user opts in:** `advancedSkills` (CSV of `context7`, `atlassian`, `notion`, `figma`) and their credential fields; `agents` (CSV of registered coding-tool IDs) when the user wants an explicit multi-agent declaration
 - **Secrets** (marked `"secret": true` in the manifest): never echo them back, never log them
 
 ### Recommendation rules

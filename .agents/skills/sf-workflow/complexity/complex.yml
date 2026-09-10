@@ -1,0 +1,107 @@
+name: complex
+label: '🔴 Complex / Critical'
+description: 'Complex feature requiring adversarial review and comprehensive testing'
+
+# Status workflow
+skipStatuses: [] # All statuses, no shortcuts
+
+# Steps configuration
+steps:
+  analyze:
+    enabled: true
+    depth: 'deep'
+    agents: 7 # 6-10 parallel agents
+    agentTypes:
+      - explore-codebase
+      - explore-docs
+      - websearch # Research best practices
+  plan:
+    enabled: true
+    depth: 'comprehensive' # Detailed plan with dependencies
+    approval: true # Mandatory user approval
+  subtasks:
+    enabled: true
+    mandatory: true # Always required
+    detailed: true # More granular subtasks
+  examine:
+    enabled: true # Adversarial review MANDATORY
+    agents: 3 # Parallel review agents
+    checks:
+      - security # OWASP top 10
+      - logic # Logic flaws
+      - performance # Performance issues
+  tests:
+    type: 'mandatory'
+    mandatory: true
+
+# Test requirements
+testing:
+  unit: true # Mandatory unit tests
+  e2e: true # Mandatory E2E tests
+  regression: true # Full regression suite
+  coverage: 80 # Minimum coverage target
+
+# AI guidance for this complexity level
+aiInstructions: |
+  This is a complex/critical feature. Maximum rigor (full apex):
+
+  **Analyze Phase (DEEP):**
+  - ADAPTIVE AGENT LAUNCHING: Launch 6-10 parallel agents
+  - explore-codebase (multiple): Find patterns, files, utilities
+  - explore-docs: Research library documentation
+  - websearch: Research best practices, gotchas, security concerns
+  - Document ALL findings with file:line references
+  - Identify dependencies, risks, and edge cases
+  - BE SMART: Don't blindly launch all agents, think about what you need
+
+  **Plan Phase (COMPREHENSIVE):**
+  - ULTRA THINK before creating the plan
+  - Create detailed file-by-file implementation strategy
+  - Include specific line numbers from analysis
+  - Map acceptance criteria to file changes
+  - Document dependencies and execution order
+  - Consider edge cases and error handling
+  - Plan test coverage
+  - Post plan as ticket comment
+  - MANDATORY USER APPROVAL before proceeding
+
+  **Execute Phase:**
+  - Create granular subtasks with clear acceptance criteria
+  - Use TodoCreate to track progress
+  - Implement following the plan exactly
+  - NEVER deviate from approved plan
+  - Read files BEFORE editing
+  - Mark todos complete immediately after each
+  - Commit frequently (each subtask done)
+  - NO scope creep
+
+  **Validate Phase:**
+  - Build + lint + typecheck + unit tests
+  - Verify EACH acceptance criterion
+  - Generate comprehensive test plan
+  - Execute test plan manually
+  - Fix failures and re-validate
+  - Post test results as comment
+
+  **Examine Phase (ADVERSARIAL REVIEW):**
+  - Launch 3 parallel review agents
+  - Security analysis: OWASP top 10 vulnerabilities
+  - Logic flaws: Edge cases, race conditions
+  - Performance: Bottlenecks, N+1 queries
+  - Classify findings by severity (Critical/High/Medium/Low)
+  - Distinguish Real vs False Positive
+  - Create todos for Real findings
+  - Fix all Critical/High findings
+  - Document Medium/Low for future consideration
+
+  **Tests Phase (MANDATORY):**
+  - Comprehensive unit test coverage (target 80%)
+  - E2E tests for all user workflows
+  - Regression tests for edge cases
+  - Run until ALL tests pass
+  - Commit tests before marking PR ready for review
+
+  **Save Mode:**
+  - ALWAYS save outputs to .claude/output/workflow/{ticket-id}/
+  - Create audit trail for review
+  - Document architectural decisions

@@ -195,6 +195,20 @@
       "required": false,
       "description": "Comma-separated list of advanced skills to install"
     },
+    "agents": {
+      "flag": "--agents",
+      "type": "csv",
+      "values": [
+        "claude-code",
+        "codex",
+        "kimi",
+        "gemini-cli",
+        "qwen-code",
+        "generic"
+      ],
+      "required": false,
+      "description": "Comma-separated coding-tool profiles to declare in the generated harness. Omission preserves the legacy implicit Claude Code declaration."
+    },
     "context7ApiKey": {
       "flag": "--context7-api-key",
       "type": "string",

@@ -20,3 +20,8 @@ pnpm-lock.yaml
 .DS_Store
 coverage/
 *.log
+
+# Generated shared agent adapters are byte-hash managed
+.agents/
+AGENTS.md
+GEMINI.md
