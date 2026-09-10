@@ -83,8 +83,8 @@
       "backend": "notion",
       "rootPage": {
         "id": "34ba31bb-4f3f-8139-a6e4-f4327648a6b9",
-        "url": "https://www.notion.so/saasfoundry-cli-srs-34ba31bb4f3f8139a6e4f4327648a6b9",
-        "name": "saasfoundry-cli-srs"
+        "url": "https://app.notion.com/p/SaaSFoundryAI-srs-34ba31bb4f3f8139a6e4f4327648a6b9",
+        "name": "SaaSFoundryAI-srs"
       },
       "scan": {
         "exclude": ["scaffolds/", "docs/", ".claude/", ".srs-audit/"]
