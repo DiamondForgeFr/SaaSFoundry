@@ -124,8 +124,16 @@ guarded workflow command. Provider login or a filesystem smoke alone does not sa
 Outside this acceptance exercise, sequential work may use one checkout after the first host has stopped and left a precise handoff. The next host rechecks the manifest, ticket, SRS and diff rather
 than assuming session context transferred.
 
-Never run two writing hosts in one checkout. Simultaneous work requires separate branches and worktrees, distinct file ownership and preferably separate real subtasks. Reconcile reviewed commits and
-rerun validation in the receiving worktree.
+Before implementation, split the request into writing streams and their dependencies. Propose parallel worktrees only when streams are independent and concurrent delivery has a material benefit.
+Read-only exploration and review may run in parallel in one checkout. Work with sequential dependencies, overlapping files or unclear ownership uses one feature worktree and sequential execution.
+
+Read `workflow.workingBranch` from `.saasfoundry.json`; never substitute a conventional branch name. Keep the primary checkout on that configured branch while feature work runs. Every parallel writer
+gets one real ticket, branch and worktree path, with an explicit owned-file set and dependency boundary. Start from a synchronized configured working branch, keep each writer inside its worktree and
+ownership boundary, and preserve unrelated changes. When the user did not already authorize parallel implementation, present this execution shape for their control before starting writers.
+
+After a stream merges, return to the primary checkout, check out and synchronize the configured working branch, and verify the merge. Remove the completed worktree and local branch only after that
+verification and only when they are no longer in use. Preserve user-created worktrees, branches, stashes and uncommitted changes. If Git support, authorization, synchronization or clean separation is
+unavailable, state the constraint and continue in one worktree or sequentially.
 
 Sequential self-review does not satisfy an independent-review requirement. Keep that requirement incomplete in AI testing until a separate authorized agent context or independent human reviewer
 completes it.

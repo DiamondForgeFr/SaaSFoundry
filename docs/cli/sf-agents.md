@@ -138,6 +138,15 @@ Each checkout keeps its own inventory and exclusions. Setup uses Git's worktree 
 worktrees. Standard repositories can enable `extensions.worktreeConfig` automatically. Configurations requiring an unrelated Git configuration migration are rejected before setup; resolve the reported
 prerequisite first.
 
+The generated agent instructions also define the execution policy for feature worktrees. Agents propose parallel worktrees only for independent writing streams whose concurrent delivery is useful;
+read-only exploration and review may share a checkout. Sequential dependencies, overlapping files and unclear ownership use one feature worktree and sequential execution. This decision is separate
+from the local configuration isolation performed by `sf agents`.
+
+The agent reads `workflow.workingBranch` from `.saasfoundry.json` and keeps the primary checkout on that configured branch. Each parallel writer receives one ticket, branch and worktree path, explicit
+owned files and a dependency boundary, and starts from a synchronized configured working branch. The user retains control when parallel implementation was not already authorized. After a verified
+merge, the agent returns to the primary checkout, synchronizes the configured working branch, then removes only the completed, unused worktree and local branch. User-owned worktrees, branches, stashes
+and uncommitted changes remain untouched.
+
 Existing user exclusions are preserved as a snapshot in the private file; their source remains untouched. Future changes to the original exclusion source are not synchronized automatically; reconcile
 the private snapshot when those rules change. Only exact locally managed paths are excluded. If repository ignore rules would leave those local files visible to Git, setup refuses before depositing
 them. The command never uses `assume-unchanged` or `skip-worktree` to hide changes to tracked files.

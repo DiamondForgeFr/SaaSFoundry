@@ -81,6 +81,9 @@ Each complexity level enables or disables specific workflow steps:
 
 **Testing matrix:** unit ✓ · E2E ✓ · regression ✓ (not strictly mandatory).
 
+The required exploration agents are read-only and may share the active checkout. If implementation is split across independent writing streams, each writer needs a separate ticket, branch and worktree
+with explicit file ownership. Coupled or overlapping implementation remains sequential in one feature worktree. The configured base branch comes from `workflow.workingBranch` in `.saasfoundry.json`.
+
 ### 🔴 Complex
 
 | Step     | Behaviour                                                                   |
@@ -103,6 +106,8 @@ The Examine phase is what separates `complex` from every other level. After vali
 
 Findings are classified by severity (Critical / High / Medium / Low) and by confidence (Real vs False Positive). Critical and High findings must be fixed before the ticket moves to Human testing.
 Medium and Low findings are documented in the ticket for future consideration.
+
+Adversarial review agents are read-only and may share the implementation checkout. Any follow-up fixes are coordinated by the owning writer; reviewers do not write concurrently in that checkout.
 
 ## Quality preservation principle
 

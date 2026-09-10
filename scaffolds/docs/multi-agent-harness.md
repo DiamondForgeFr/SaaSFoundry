@@ -43,7 +43,17 @@ Native delegation must be available and authorized in the current host. Disclose
 
 ## Team usage
 
-A developer can alternate agents on one completed piece of work without changing the project's supported agents. For simultaneous implementation on different changes, use separate branches and worktrees. Share the board and SRS, and hand off the ticket, branch, completed checks and remaining work explicitly.
+A developer can alternate agents on one completed piece of work without changing the project's supported agents. Before implementation, the agent identifies independent writing streams and proposes
+parallel worktrees only when concurrent delivery is useful. Read-only exploration and review may run in parallel in one checkout. Sequential dependencies, overlapping files or unclear ownership use
+one feature worktree and sequential execution.
+
+Read `workflow.workingBranch` from `.saasfoundry.json` and keep the primary checkout on that configured branch. Each parallel writer receives one ticket, branch and worktree path, explicit owned files
+and a dependency boundary, and starts from a synchronized configured working branch. The user retains control when parallel implementation was not already authorized. Share the board and SRS, and
+hand off the ticket, branch, completed checks and remaining work explicitly.
+
+After a stream merges, return to the primary checkout, synchronize the configured working branch and verify the merge before removing the completed, unused worktree and local branch. Preserve
+user-created worktrees, branches, stashes and uncommitted changes. If authorization, Git support, synchronization or clean separation is unavailable, state the constraint and use one worktree or
+sequential execution.
 
 Runtime discovery must be verified in the actual agent. Filesystem and installer tests establish that the expected files exist; they do not establish that a particular desktop or CLI version loaded them.
 
