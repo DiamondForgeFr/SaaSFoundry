@@ -131,6 +131,12 @@ describe('agent capability diagnostics (#650)', () => {
     expect(initialization).toContain('independent review')
     expect(initialization).toContain('keep a required review incomplete')
     expect(initialization).toContain('independent human reviewer')
+    expect(initialization).toContain('workflow.workingbranch')
+    expect(initialization).toContain('independent writing streams')
+    expect(initialization).toContain('read-only agents may share a checkout')
+    expect(initialization).toContain('parallel writers need separate tickets, branches, worktrees, owned files and dependency boundaries')
+    expect(initialization).toContain('clean up only after a verified merge')
+    expect(initialization).toContain('diagnostics do not verify delegation authorization')
   })
 
   it.each([

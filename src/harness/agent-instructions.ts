@@ -40,6 +40,33 @@ export interface InstallAgentInstructionsParams {
   referenceOnly?: boolean
 }
 
+const WORKTREE_ORCHESTRATION = `## Parallel implementation and Git worktrees
+
+Propose parallel worktrees only when the user's request contains independent writing streams
+that can be delivered concurrently. Read-only exploration and review may use parallel agents
+without separate worktrees. Work with sequential dependencies, overlapping file ownership or
+unclear boundaries must use one feature worktree and sequential execution.
+
+Before proposing parallel implementation, read \`.saasfoundry.json\` and use
+\`workflow.workingBranch\`; never hardcode a branch name. Keep the primary checkout on that
+configured working branch. Do not let feature workers write in the primary checkout while
+parallel worktrees are active.
+
+For each independent writing stream, define one ticket, branch and worktree path, plus its owned
+files and dependency boundary. Start from a synchronized configured working branch. Each worker
+must stay inside its assigned worktree and ownership boundary, preserve other agents' changes
+and never revert unrelated work. The agent proposes this execution shape; the user retains
+control when parallel implementation was not already authorized. If authorization, clean
+separation, Git support or a synchronized base is unavailable, explain the constraint and use
+one worktree or sequential execution.
+
+After each stream is complete, commit and push through the configured workflow. After its merge,
+return to the primary checkout, check out and synchronize the configured working branch, verify
+the merge, then remove the completed worktree and local branch only when they are merged and no
+longer in use. Never remove or overwrite user-owned worktrees, branches, uncommitted changes,
+stashes or credentials implicitly.
+`
+
 const CAPABILITIES = `## Execution capabilities
 
 Use the current agent's native tools for reading, editing, shell commands and delegation.
@@ -54,6 +81,8 @@ The project manifest and workflow rules take precedence over generic skill examp
 including branch names, commit formats, staging, pushing and approval requirements.
 Legacy /task examples name roles: use native delegation if available and authorized,
 or perform the role's work sequentially with the review limitation stated above.
+
+${WORKTREE_ORCHESTRATION}
 `
 
 export const COMMON_INSTRUCTIONS = `# SaaSFoundry agent instructions

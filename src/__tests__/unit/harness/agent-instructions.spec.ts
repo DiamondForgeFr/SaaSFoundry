@@ -70,7 +70,24 @@ describe('shared agent instructions', () => {
     expect(await get('AGENTS.md')).toContain('`nature:bundled-pr` child')
     expect(await get('AGENTS.md')).toContain('An Epic has no PR')
     expect(await get('AGENTS.md')).toContain('every native child has board status Done')
+    expect(await get('AGENTS.md')).toContain('## Parallel implementation and Git worktrees')
+    expect(await get('AGENTS.md')).toContain('Read-only exploration and review may use parallel agents')
+    expect(await get('AGENTS.md')).toMatch(/use\s+`workflow\.workingBranch`; never hardcode a branch name/)
+    expect(await get('AGENTS.md')).toContain('one ticket, branch and worktree path')
+    expect(await get('AGENTS.md')).toMatch(/user retains\s+control/)
+    expect(await get('AGENTS.md')).toMatch(/only when they are merged and no\s+longer in use/)
     expect(result.warnings.some((w) => w.includes("'model'"))).toBe(true)
+  })
+
+  it('keeps the worktree orchestration contract provider-neutral in shared and adoption instructions', () => {
+    for (const instructions of [COMMON_INSTRUCTIONS, ADOPTION_COMMON_INSTRUCTIONS]) {
+      expect(instructions).toContain('## Parallel implementation and Git worktrees')
+      expect(instructions).toContain('configured working branch')
+      expect(instructions).toContain('overlapping file ownership')
+      expect(instructions).toContain('Read-only exploration and review may use parallel agents')
+      expect(instructions).not.toMatch(/\bdevelop\b/)
+    }
+    expect(CODEX_SOURCE_CLAUDE_BRIDGE).toContain('@AGENTS.md')
   })
 
   it('is opt-in and does not generate files for Claude-only configuration', async () => {
@@ -167,6 +184,7 @@ describe('shared agent instructions', () => {
     expect(await get('AGENTS.md')).toContain('.claude/skills/*/SKILL.md')
     expect(await get('AGENTS.md')).toContain('.claude/skills/sf-workflow/workflow-cli.sh')
     expect(await get('AGENTS.md')).toContain('## Execution capabilities')
+    expect(await get('AGENTS.md')).toContain('## Parallel implementation and Git worktrees')
     expect(await get('.claude/skills/sf-workflow/SKILL.md')).toBe(skill)
     expect(await get('.claude/skills/sf-workflow/workflow-cli.sh')).toBe(script)
     await expect(get('.agents/skills/sf-workflow/SKILL.md')).rejects.toMatchObject({ code: 'ENOENT' })
