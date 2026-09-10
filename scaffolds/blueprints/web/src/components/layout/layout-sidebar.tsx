@@ -8,18 +8,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 /**
  * Components
  */
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarRail,
-  SidebarSeparator,
-  useSidebar
-} from '@/components/ui/shadcn/sidebar'
+import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarRail, SidebarSeparator, useSidebar } from '@/components/ui/shadcn/sidebar'
 
 import { NavSection } from '@/components/nav/nav-section'
 import { NavUser } from '@/components/nav/nav-user'

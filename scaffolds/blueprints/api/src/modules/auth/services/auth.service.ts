@@ -66,7 +66,8 @@ export class AuthService {
     const response: SignUpResponseDto = {
       message: 'If the email address is valid, you will receive a confirmation email shortly.'
     }
-    const { email, password, locale } = signUpDto
+    const { email, password } = signUpDto
+    // TODO mailer-service-active: const { locale } = signUpDto
 
     this.logger.debug(`Sign-up attempt for ${email}`, 'signUp')
 

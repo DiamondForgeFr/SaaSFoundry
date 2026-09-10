@@ -203,6 +203,7 @@ function buildMultirepoWeb(projectDir: string, projectName: string): void {
 function buildMonorepo(projectDir: string): void {
   run('npm install --ignore-scripts', projectDir, 'npm install (monorepo root)')
   run('npx prisma generate', join(projectDir, 'apps', 'api'), 'prisma generate')
+  run('npm run lint', projectDir, 'lint all monorepo workspaces')
   run('npx turbo run build', projectDir, 'turbo run build')
 }
 

@@ -113,6 +113,11 @@ describe('installStorageModule (integration)', () => {
     await expectNoTodoMarkers(join(apiPath, 'src/modules/organizations/organizations.module.ts'), 'storage-service-active')
     await expectNoTodoMarkers(join(apiPath, 'src/modules/organizations/controllers/organization.controller.ts'), 'storage-service-active')
     await expectNoTodoMarkers(join(apiPath, 'src/modules/organizations/services/organization.service.ts'), 'storage-service-active')
+    await expectFileContains(join(apiPath, 'src/modules/organizations/controllers/organization.controller.ts'), "import { FileInterceptor } from '@nestjs/platform-express'")
+    await expectFileContains(
+      join(apiPath, 'src/modules/organizations/services/organization.service.ts'),
+      'private readonly accountAccessService: AccountAccessService,\n    private readonly storageService: StorageService'
+    )
   })
 
   it('should set docker S3 credentials in .env when s3Setup is docker', async () => {

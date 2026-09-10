@@ -27,8 +27,8 @@ export class OrganizationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly logger: Logger,
-    private readonly accountAccessService: AccountAccessService,
-    // TODO storage-service-active: private readonly storageService: StorageService
+    private readonly accountAccessService: AccountAccessService
+    // TODO storage-service-active-parameter: private readonly storageService: StorageService
   ) {}
 
   /**

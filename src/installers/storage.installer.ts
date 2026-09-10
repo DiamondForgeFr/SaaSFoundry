@@ -64,13 +64,14 @@ const STORAGE_GATED_FILES = [
 ]
 
 const STORAGE_MARKER = /\/\/ TODO storage-service-active: /g
+const STORAGE_PARAMETER_MARKER = /\n(\s*)\/\/ TODO storage-service-active-parameter: /g
 
 async function activateStorageCode(apiPath: string): Promise<void> {
   for (const relative of STORAGE_GATED_FILES) {
     const path = `${apiPath}/${relative}`
     if (!(await fileExists(path))) continue
     const content = await readFile(path, 'utf8')
-    await writeFile(path, content.replace(STORAGE_MARKER, ''))
+    await writeFile(path, content.replace(STORAGE_PARAMETER_MARKER, ',\n$1').replace(STORAGE_MARKER, ''))
   }
 }
 
