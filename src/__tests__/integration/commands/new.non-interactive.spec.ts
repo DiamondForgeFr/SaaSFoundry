@@ -1,4 +1,4 @@
-import { mkdir, rm, readFile } from 'fs/promises'
+import { mkdir, rm, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -49,6 +49,7 @@ import { installSkills } from '../../../installers/skills.installer'
 import { initAndStartDb } from '../../../runners/database.runner'
 import { initAndStartS3 } from '../../../runners/s3.runner'
 import { openTerminal } from '../../../runners/terminal.runner'
+import { readAgentSupport } from '../../../harness/agent-support'
 
 const mockedPrompt = inquirer.prompt as unknown as jest.Mock
 const mockedCreateApiApp = createApiApp as jest.MockedFunction<typeof createApiApp>
@@ -106,6 +107,12 @@ describe('newCommand (non-interactive integration)', () => {
     emailService: 'none' as const,
     analytics: false,
     workflow: 'none'
+  }
+
+  const seedHarnessSource = async (relativeRoot: string) => {
+    await mkdir(relativeRoot, { recursive: true })
+    await writeFile(join(relativeRoot, 'CLAUDE.md'), '# Generated project instructions\n')
+    return true
   }
 
   it('runs end-to-end from flags alone without asking the user any question', async () => {
@@ -187,6 +194,32 @@ describe('newCommand (non-interactive integration)', () => {
         advancedSkills: []
       }
     })
+  })
+
+  it('wires the selected agents into both independent multirepo harness roots', async () => {
+    mockedCreateApiApp.mockImplementationOnce(async ({ projectName }) => seedHarnessSource(`apps/${projectName}-api`))
+    mockedCreateWebApp.mockImplementationOnce(async ({ projectName }) => seedHarnessSource(`apps/${projectName}-web`))
+
+    await newCommand({ ...baseOpts, agents: 'claude-code,codex' })
+
+    for (const app of ['acme-api', 'acme-web']) {
+      const root = join(process.cwd(), 'apps', app)
+      const manifest = JSON.parse(await readFile(join(root, '.saasfoundry.json'), 'utf8'))
+      expect(manifest).toMatchObject({ structure: 'cli', projectName: app, modules: { harness: { agents: ['claude-code', 'codex'] } } })
+      expect(await readAgentSupport(root)).toMatchObject({ sharedAgents: ['claude-code', 'codex'], localAgents: [] })
+      expect(await readFile(join(root, 'AGENTS.md'), 'utf8')).toContain('Coding-agent identity and onboarding')
+    }
+  })
+
+  it('wires the selected agents into the single monorepo harness root', async () => {
+    mockedCreateMonorepoRoot.mockImplementationOnce(async () => seedHarnessSource('.'))
+
+    await newCommand({ ...baseOpts, structure: 'monorepo', agents: 'claude-code,codex' })
+
+    const manifest = JSON.parse(await readFile('.saasfoundry.json', 'utf8'))
+    expect(manifest.modules.harness.agents).toEqual(['claude-code', 'codex'])
+    expect(await readAgentSupport(process.cwd())).toMatchObject({ sharedAgents: ['claude-code', 'codex'], localAgents: [] })
+    expect(await readFile('AGENTS.md', 'utf8')).toContain('Coding-agent identity and onboarding')
   })
 
   it('creates a monorepo root when --structure monorepo', async () => {

@@ -68,8 +68,10 @@ describe('newCommand flow (E2E)', () => {
     for (const app of ['agent-multi-api', 'agent-multi-web']) {
       const appRoot = join(projectDir, 'apps', app)
       const appManifest = JSON.parse(await readFile(join(appRoot, '.saasfoundry.json'), 'utf8'))
-      expect(appManifest.structure).toBe('multirepo')
+      expect(appManifest.structure).toBe('cli')
+      expect(appManifest.projectName).toBe(app)
       expect(appManifest.modules.harness.agents).toEqual(['claude-code', 'codex', 'gemini-cli'])
+      expect(Object.keys(appManifest.modules).sort()).toEqual(['advancedSkills', 'harness'])
       expect(await readFile(join(appRoot, 'AGENTS.md'), 'utf8')).toContain('SaaSFoundry agent instructions')
       expect(await readFile(join(appRoot, 'GEMINI.md'), 'utf8')).toContain('@AGENTS.md')
     }
