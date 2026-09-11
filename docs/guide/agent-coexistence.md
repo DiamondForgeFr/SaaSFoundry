@@ -8,6 +8,9 @@ SaaSFoundryAI can prepare one project for several coding-agent hosts without sel
 
 A result from one machine does not certify another host version, authentication context, plugin set or permission policy.
 
+Coding-agent profiles describe instruction and skill discovery only. Model providers, local runtimes, models, and effort levels are separate [execution candidates](./execution-candidates). This keeps
+`sf agents` additive for teams while allowing a later router to compare the targets available to the current host without encoding provider names in portable workflow instructions.
+
 ## Verdict matrix
 
 Record each capability as `observed`, `structural`, `not-checked`, `blocked` or `failed`. Use `observed` only for evidence produced by the named native host during that run.
