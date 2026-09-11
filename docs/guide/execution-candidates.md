@@ -20,10 +20,11 @@ Every provider/runtime adapter normalizes its records into the same contract:
 | Price        | Timestamped dimensions expressed as decimal amounts, currency, normalized unit, denominator, and original provider unit |
 | Privacy      | Execution boundary, residency where known, training-use policy, and retention where known                               |
 | Tools        | Invocation mode, supported tools, parallel-call support, and approval behavior                                          |
-| Provenance   | Adapter, provider record reference, retrieval time, and public original metadata                                        |
+| Provenance   | Adapter, provider record reference, and retrieval time                                                                  |
 
-Provider-specific effort labels and units remain in the provenance record after normalization. Adapters must submit public metadata only. The catalogue also rejects common secret-bearing keys and
-recognizable credential formats before a candidate can enter the eligible view; it never copies raw adapter errors into a snapshot.
+Provider-specific effort identifiers, labels, and pricing units remain beside their normalized values for audit and recalibration. The common contract is an explicit allowlist: adapters cannot attach
+raw responses, provider configuration, or opaque metadata. They must keep credentials behind the adapter boundary. Runtime validation additionally rejects recognizable credential formats from every
+public text field, and the catalogue never copies raw adapter errors into a snapshot.
 
 ## Eligible and excluded views
 

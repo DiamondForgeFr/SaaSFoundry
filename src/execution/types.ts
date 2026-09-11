@@ -1,6 +1,3 @@
-export type JsonPrimitive = string | number | boolean | null
-export type JsonValue = JsonPrimitive | { [key: string]: JsonValue } | JsonValue[]
-
 export type NormalizedEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' | 'custom'
 export type RuntimeKind = 'cloud' | 'local' | 'hybrid'
 export type PrivacyBoundary = 'local-device' | 'customer-controlled' | 'provider-managed' | 'unknown'
@@ -69,8 +66,6 @@ export interface ExecutionCandidate extends ExecutionCandidateIdentity {
     /** Stable reference used by the adapter for this provider/runtime record. */
     candidateRef: string
     retrievedAt: string
-    /** Public provider metadata only. Credentials and secrets are rejected. */
-    original: JsonValue
   }
 }
 
@@ -80,7 +75,12 @@ export interface ExecutionCandidateObservation {
   value: unknown
 }
 
-/** Provider-specific discovery and normalization stay behind this interface. */
+/**
+ * Provider-specific discovery and normalization stay behind this interface.
+ * Adapters must map only the explicitly declared public fields above. Raw provider
+ * responses, configuration objects, credentials, and opaque metadata bags must
+ * remain behind the adapter boundary.
+ */
 export interface ExecutionCandidateAdapter {
   readonly id: string
   discover(): Promise<readonly ExecutionCandidateObservation[]> | readonly ExecutionCandidateObservation[]
