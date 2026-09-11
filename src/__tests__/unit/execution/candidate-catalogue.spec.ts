@@ -142,6 +142,37 @@ describe('provider-neutral execution candidate catalogue (#677)', () => {
     expect(JSON.stringify(snapshot)).not.toContain('credential detail must stay private')
   })
 
+  it('rejects credentials from every normalized provider-controlled string family', async () => {
+    const secret = 'sk-normalizedfieldsecret123456789'
+    const cases: Array<{ name: string; mutate: (entry: ExecutionCandidate) => void }> = [
+      { name: 'display-name', mutate: (entry) => (entry.provider.displayName = secret) },
+      { name: 'identifier', mutate: (entry) => (entry.model.id = secret) },
+      { name: 'effort-source-id', mutate: (entry) => (entry.effort.sourceId = secret) },
+      { name: 'effort-source-label', mutate: (entry) => (entry.effort.sourceLabel = secret) },
+      { name: 'availability-detail', mutate: (entry) => (entry.availability.reason = { code: 'unavailable', detail: secret }) },
+      { name: 'pricing-source-unit', mutate: (entry) => (entry.pricing.dimensions[0].sourceUnit = secret) },
+      { name: 'privacy-residency', mutate: (entry) => (entry.privacy.dataResidency = [secret]) },
+      { name: 'privacy-retention', mutate: (entry) => (entry.privacy.retention = secret) },
+      { name: 'capability', mutate: (entry) => (entry.capabilities = [secret]) },
+      { name: 'tool-name', mutate: (entry) => (entry.tools.supported = [secret]) },
+      { name: 'source-reference', mutate: (entry) => (entry.source.candidateRef = secret) },
+      { name: 'original-key', mutate: (entry) => (entry.source.original = { [secret]: 'public' }) }
+    ]
+    const catalogue = new ExecutionCandidateCatalogue({ clock: () => NOW })
+    for (const [index, fixture] of cases.entries()) {
+      const entry = candidate({ adapterId: `safe-adapter-${index}`, modelId: fixture.name })
+      fixture.mutate(entry)
+      catalogue.register(adapter(entry.source.adapterId, [entry]))
+    }
+
+    const snapshot = await catalogue.snapshot()
+
+    expect(snapshot.eligible).toEqual([])
+    expect(snapshot.excluded).toHaveLength(cases.length)
+    expect(snapshot.excluded.every((entry) => entry.exclusion.code === 'invalid-candidate')).toBe(true)
+    expect(JSON.stringify(snapshot)).not.toContain(secret)
+  })
+
   it('requires canonical identities and strict UTC timestamps', async () => {
     const wrongId = { ...candidate({ adapterId: 'openai', modelId: 'wrong-id' }), id: 'openai/custom-id' }
     const looseDate = candidate({ adapterId: 'anthropic', modelId: 'loose-date' })
