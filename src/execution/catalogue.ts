@@ -74,12 +74,33 @@ function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+function secretKey(value: string): boolean {
+  return SECRET_KEYS.has(value.replace(/[^a-z0-9]/gi, '').toLowerCase())
+}
+
+function containsCredential(value: string): boolean {
+  try {
+    const url = new URL(value)
+    if (url.username || url.password || [...url.searchParams.keys()].some(secretKey)) return true
+  } catch {
+    // Most public metadata strings are not URLs.
+  }
+  return (
+    SECRET_VALUES.some((pattern) => pattern.test(value)) ||
+    /\b(?:api[_-]?key|authorization|bearer|client[_-]?secret|cookie|credentials?|password|private[_-]?key|refresh[_-]?token|secret|session[_-]?id|access[_-]?token|token)\s*[:=]\s*\S+/i.test(value)
+  )
+}
+
+function publicText(value: unknown): value is string {
+  return nonEmpty(value) && !containsCredential(value)
+}
+
 function id(value: unknown): value is string {
-  return nonEmpty(value) && SAFE_COMPONENT.test(value)
+  return publicText(value) && SAFE_COMPONENT.test(value)
 }
 
 function reference(value: unknown): value is string {
-  return nonEmpty(value) && SAFE_REFERENCE.test(value)
+  return publicText(value) && SAFE_REFERENCE.test(value)
 }
 
 function isObservation(value: unknown): value is ExecutionCandidateObservation {
@@ -91,7 +112,7 @@ function positiveIntegerOrNull(value: unknown): boolean {
 }
 
 function stringList(value: unknown, allowEmpty = true): value is string[] {
-  return Array.isArray(value) && (allowEmpty || value.length > 0) && value.every(nonEmpty) && new Set(value).size === value.length
+  return Array.isArray(value) && (allowEmpty || value.length > 0) && value.every(publicText) && new Set(value).size === value.length
 }
 
 function idList(value: unknown, allowEmpty = true): value is string[] {
@@ -101,14 +122,7 @@ function idList(value: unknown, allowEmpty = true): value is string[] {
 function validateJson(value: unknown, path: string, issues: string[], ancestors = new Set<object>()): value is JsonValue {
   if (value === null || typeof value === 'boolean') return true
   if (typeof value === 'string') {
-    let credentialUrl = false
-    try {
-      const url = new URL(value)
-      credentialUrl = Boolean(url.username || url.password)
-    } catch {
-      // Most metadata strings are not URLs.
-    }
-    if (credentialUrl || SECRET_VALUES.some((pattern) => pattern.test(value))) {
+    if (containsCredential(value)) {
       issues.push(`${path} contains a recognizable credential value`)
       return false
     }
@@ -134,8 +148,11 @@ function validateJson(value: unknown, path: string, issues: string[], ancestors 
     })
   } else {
     for (const [key, entry] of Object.entries(value)) {
-      if (SECRET_KEYS.has(key.replace(/[^a-z0-9]/gi, '').toLowerCase())) {
+      if (secretKey(key)) {
         issues.push(`${path} contains secret-bearing key '${key}'`)
+        valid = false
+      } else if (containsCredential(key)) {
+        issues.push(`${path} contains a recognizable credential key`)
         valid = false
       }
       if (!validateJson(entry, `${path}.${key}`, issues, ancestors)) valid = false
@@ -147,7 +164,7 @@ function validateJson(value: unknown, path: string, issues: string[], ancestors 
 
 function validateNamedId(value: unknown, path: string, issues: string[]): void {
   if (!isObject(value) || !id(value.id)) issues.push(`${path}.id must be a safe non-empty identifier`)
-  else if (value.displayName !== undefined && !nonEmpty(value.displayName)) issues.push(`${path}.displayName must be a non-empty string when present`)
+  else if (value.displayName !== undefined && !publicText(value.displayName)) issues.push(`${path}.displayName must be public non-empty text when present`)
 }
 
 /** Runtime validation is required because adapters ingest provider-owned data. */
@@ -163,8 +180,8 @@ export function assertExecutionCandidate(value: unknown): asserts value is Execu
   if (!isObject(value.effort)) issues.push('effort must be an object')
   else {
     if (!EFFORTS.has(value.effort.normalized as NormalizedEffort)) issues.push('effort.normalized is unsupported')
-    if (!nonEmpty(value.effort.sourceId)) issues.push('effort.sourceId must be a non-empty string')
-    if (value.effort.sourceLabel !== undefined && !nonEmpty(value.effort.sourceLabel)) issues.push('effort.sourceLabel must be a non-empty string when present')
+    if (!publicText(value.effort.sourceId)) issues.push('effort.sourceId must be public non-empty text')
+    if (value.effort.sourceLabel !== undefined && !publicText(value.effort.sourceLabel)) issues.push('effort.sourceLabel must be public non-empty text when present')
   }
 
   if (!isObject(value.context)) issues.push('context must be an object')
@@ -183,7 +200,7 @@ export function assertExecutionCandidate(value: unknown): asserts value is Execu
       issues.push('availability.validUntil must be later than checkedAt')
     if (value.availability.reason !== undefined) {
       if (!isObject(value.availability.reason) || !id(value.availability.reason.code)) issues.push('availability.reason.code must be a safe non-empty identifier')
-      else if (value.availability.reason.detail !== undefined && !nonEmpty(value.availability.reason.detail)) issues.push('availability.reason.detail must be non-empty when present')
+      else if (value.availability.reason.detail !== undefined && !publicText(value.availability.reason.detail)) issues.push('availability.reason.detail must be public non-empty text when present')
     }
   }
 
@@ -206,7 +223,7 @@ export function assertExecutionCandidate(value: unknown): asserts value is Execu
         if (!nonEmpty(dimension.currency) || !/^[A-Z]{3}$/.test(dimension.currency)) issues.push(`${path}.currency must be a three-letter uppercase code`)
         if (!PRICE_UNITS.has(dimension.unit as PriceUnit)) issues.push(`${path}.unit is unsupported`)
         if (!Number.isInteger(dimension.per) || Number(dimension.per) <= 0) issues.push(`${path}.per must be a positive integer`)
-        if (!nonEmpty(dimension.sourceUnit)) issues.push(`${path}.sourceUnit must retain the provider unit`)
+        if (!publicText(dimension.sourceUnit)) issues.push(`${path}.sourceUnit must retain a public provider unit`)
       })
   }
 
@@ -214,8 +231,8 @@ export function assertExecutionCandidate(value: unknown): asserts value is Execu
   else {
     if (!PRIVACY.has(value.privacy.boundary as PrivacyBoundary)) issues.push('privacy.boundary is unsupported')
     if (!TRAINING.has(value.privacy.trainingUse as TrainingUse)) issues.push('privacy.trainingUse is unsupported')
-    if (value.privacy.dataResidency !== undefined && !stringList(value.privacy.dataResidency)) issues.push('privacy.dataResidency must contain unique non-empty values')
-    if (value.privacy.retention !== undefined && !nonEmpty(value.privacy.retention)) issues.push('privacy.retention must be non-empty when present')
+    if (value.privacy.dataResidency !== undefined && !stringList(value.privacy.dataResidency)) issues.push('privacy.dataResidency must contain unique public non-empty values')
+    if (value.privacy.retention !== undefined && !publicText(value.privacy.retention)) issues.push('privacy.retention must be public non-empty text when present')
   }
 
   if (!isObject(value.tools)) issues.push('tools must be an object')
