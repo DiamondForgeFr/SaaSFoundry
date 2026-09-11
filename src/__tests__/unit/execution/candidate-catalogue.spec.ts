@@ -19,7 +19,6 @@ interface CandidateOptions {
   availabilityReason?: { code: string; detail?: string }
   availabilityUntil?: string
   pricingUntil?: string
-  original?: ExecutionCandidate['source']['original']
 }
 
 function candidate(options: CandidateOptions): ExecutionCandidate {
@@ -62,8 +61,7 @@ function candidate(options: CandidateOptions): ExecutionCandidate {
     source: {
       adapterId: options.adapterId,
       candidateRef,
-      retrievedAt: '2026-09-11T09:00:00.000Z',
-      original: options.original ?? { effort: sourceEffort, price_unit: options.sourceUnit ?? 'USD / 1M input tokens' }
+      retrievedAt: '2026-09-11T09:00:00.000Z'
     }
   }
 }
@@ -94,7 +92,8 @@ describe('provider-neutral execution candidate catalogue (#677)', () => {
     expect(snapshot).toMatchObject({ version: 1, generatedAt: NOW.toISOString(), excluded: [] })
     expect(snapshot.eligible.map((entry) => entry.id)).toEqual([...fixtures.map((entry) => entry.id)].sort())
     expect(snapshot.eligible.map((entry) => entry.effort.normalized)).toEqual(expect.arrayContaining(['medium', 'high', 'custom', 'xhigh']))
-    expect(snapshot.eligible.find((entry) => entry.provider.id === 'openai')?.source.original).toEqual({ effort: 'xhigh', price_unit: '$ / 1M input tokens' })
+    expect(snapshot.eligible.find((entry) => entry.provider.id === 'openai')?.effort).toMatchObject({ sourceId: 'xhigh', sourceLabel: 'xhigh' })
+    expect(snapshot.eligible.find((entry) => entry.provider.id === 'openai')?.pricing.dimensions[0].sourceUnit).toBe('$ / 1M input tokens')
     expect(snapshot.eligible.find((entry) => entry.runtime.kind === 'local')?.privacy.boundary).toBe('local-device')
   })
 
@@ -125,7 +124,7 @@ describe('provider-neutral execution candidate catalogue (#677)', () => {
   it('fails closed for malformed, secret-bearing, duplicate, and failed-adapter records', async () => {
     const duplicateA = candidate({ adapterId: 'host-a', providerId: 'openai', modelId: 'duplicate' })
     const duplicateB = { ...candidate({ adapterId: 'host-b', providerId: 'openai', modelId: 'duplicate' }), id: duplicateA.id }
-    const secret = candidate({ adapterId: 'unsafe', modelId: 'secret', original: { public_model: 'secret', note: 'Bearer must-never-enter-the-catalogue-123456789' } })
+    const secret = candidate({ adapterId: 'unsafe', modelId: 'secret', availabilityReason: { code: 'provider-error', detail: 'Bearer must-never-enter-the-catalogue-123456789' } })
     const invalidPrice = candidate({ adapterId: 'broken-price', modelId: 'bad-price', amount: '-1.5' })
     const catalogue = new ExecutionCandidateCatalogue({ clock: () => NOW })
       .register(adapter('host-a', [duplicateA]))
@@ -155,8 +154,7 @@ describe('provider-neutral execution candidate catalogue (#677)', () => {
       { name: 'privacy-retention', mutate: (entry) => (entry.privacy.retention = secret) },
       { name: 'capability', mutate: (entry) => (entry.capabilities = [secret]) },
       { name: 'tool-name', mutate: (entry) => (entry.tools.supported = [secret]) },
-      { name: 'source-reference', mutate: (entry) => (entry.source.candidateRef = secret) },
-      { name: 'original-key', mutate: (entry) => (entry.source.original = { [secret]: 'public' }) }
+      { name: 'source-reference', mutate: (entry) => (entry.source.candidateRef = secret) }
     ]
     const catalogue = new ExecutionCandidateCatalogue({ clock: () => NOW })
     for (const [index, fixture] of cases.entries()) {
@@ -189,17 +187,34 @@ describe('provider-neutral execution candidate catalogue (#677)', () => {
     ])
   })
 
+  it('publishes only the closed contract and drops opaque adapter metadata', async () => {
+    const opaqueSecret = 'provider-specific-credential-format-outside-the-public-contract'
+    const entry = candidate({ adapterId: 'closed-contract', modelId: 'safe-model' })
+    Object.assign(entry as unknown as Record<string, unknown>, { providerConfiguration: opaqueSecret })
+    Object.assign(entry.effort as unknown as Record<string, unknown>, { rawProviderResponse: opaqueSecret })
+    Object.assign(entry.source as unknown as Record<string, unknown>, { original: { metadata: opaqueSecret } })
+    const catalogue = new ExecutionCandidateCatalogue({ clock: () => NOW }).register(adapter('closed-contract', [entry]))
+
+    const snapshot = await catalogue.snapshot()
+
+    expect(snapshot.eligible).toHaveLength(1)
+    expect(JSON.stringify(snapshot)).not.toContain(opaqueSecret)
+    expect(snapshot.eligible[0]).not.toHaveProperty('providerConfiguration')
+    expect(snapshot.eligible[0].effort).not.toHaveProperty('rawProviderResponse')
+    expect(snapshot.eligible[0].source).not.toHaveProperty('original')
+  })
+
   it('keeps catalogue output deterministic and detached from adapter-owned objects', async () => {
-    const first = candidate({ adapterId: 'z-provider', modelId: 'z-model', original: { effort: 'provider-z' } })
-    const second = candidate({ adapterId: 'a-provider', modelId: 'a-model', original: { effort: 'provider-a' } })
+    const first = candidate({ adapterId: 'z-provider', modelId: 'z-model', sourceEffort: 'provider-z' })
+    const second = candidate({ adapterId: 'a-provider', modelId: 'a-model', sourceEffort: 'provider-a' })
     const catalogue = new ExecutionCandidateCatalogue({ clock: () => NOW }).register(adapter('z-provider', [first])).register(adapter('a-provider', [second]))
 
     const snapshot = await catalogue.snapshot()
-    ;(first.source.original as { effort: string }).effort = 'mutated-after-snapshot'
+    first.effort.sourceLabel = 'mutated-after-snapshot'
     first.capabilities.length = 0
 
     expect(snapshot.eligible.map((entry) => entry.id)).toEqual([...snapshot.eligible.map((entry) => entry.id)].sort())
-    expect(snapshot.eligible.find((entry) => entry.source.adapterId === 'z-provider')?.source.original).toEqual({ effort: 'provider-z' })
+    expect(snapshot.eligible.find((entry) => entry.source.adapterId === 'z-provider')?.effort.sourceLabel).toBe('provider-z')
     expect(snapshot.eligible.find((entry) => entry.source.adapterId === 'z-provider')?.capabilities).toEqual(['text', 'tool-use'])
   })
 

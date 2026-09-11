@@ -6,7 +6,6 @@ import {
   ExecutionCandidateCatalogueSnapshot,
   ExecutionCandidateIdentity,
   ExecutionCandidateObservation,
-  JsonValue,
   NormalizedEffort,
   PriceDimensionKind,
   PriceUnit,
@@ -119,49 +118,6 @@ function idList(value: unknown, allowEmpty = true): value is string[] {
   return stringList(value, allowEmpty) && value.every(id)
 }
 
-function validateJson(value: unknown, path: string, issues: string[], ancestors = new Set<object>()): value is JsonValue {
-  if (value === null || typeof value === 'boolean') return true
-  if (typeof value === 'string') {
-    if (containsCredential(value)) {
-      issues.push(`${path} contains a recognizable credential value`)
-      return false
-    }
-    return true
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) issues.push(`${path} contains a non-finite number`)
-    return Number.isFinite(value)
-  }
-  if (typeof value !== 'object') {
-    issues.push(`${path} is not JSON-compatible`)
-    return false
-  }
-  if (ancestors.has(value)) {
-    issues.push(`${path} contains a cycle`)
-    return false
-  }
-  ancestors.add(value)
-  let valid = true
-  if (Array.isArray(value)) {
-    value.forEach((entry, index) => {
-      if (!validateJson(entry, `${path}[${index}]`, issues, ancestors)) valid = false
-    })
-  } else {
-    for (const [key, entry] of Object.entries(value)) {
-      if (secretKey(key)) {
-        issues.push(`${path} contains secret-bearing key '${key}'`)
-        valid = false
-      } else if (containsCredential(key)) {
-        issues.push(`${path} contains a recognizable credential key`)
-        valid = false
-      }
-      if (!validateJson(entry, `${path}.${key}`, issues, ancestors)) valid = false
-    }
-  }
-  ancestors.delete(value)
-  return valid
-}
-
 function validateNamedId(value: unknown, path: string, issues: string[]): void {
   if (!isObject(value) || !id(value.id)) issues.push(`${path}.id must be a safe non-empty identifier`)
   else if (value.displayName !== undefined && !publicText(value.displayName)) issues.push(`${path}.displayName must be public non-empty text when present`)
@@ -248,7 +204,6 @@ export function assertExecutionCandidate(value: unknown): asserts value is Execu
     if (!id(value.source.adapterId)) issues.push('source.adapterId must be a safe non-empty identifier')
     if (!reference(value.source.candidateRef)) issues.push('source.candidateRef must be a safe non-empty identifier')
     if (!date(value.source.retrievedAt)) issues.push('source.retrievedAt must be a canonical UTC ISO timestamp')
-    validateJson(value.source.original, 'source.original', issues)
   }
   if (isObject(value.provider) && id(value.provider.id) && isObject(value.runtime) && id(value.runtime.id) && isObject(value.model) && id(value.model.id) && isObject(value.effort)) {
     const normalized = value.effort.normalized as NormalizedEffort
@@ -265,26 +220,53 @@ export function createExecutionCandidateId(providerId: string, runtimeId: string
   return `${providerId}/${runtimeId}/${modelId}/${effort}`
 }
 
-function cloneJson(value: JsonValue): JsonValue {
-  if (Array.isArray(value)) return value.map(cloneJson)
-  if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneJson(entry as JsonValue)]))
-  return value
-}
-
 function cloneCandidate(candidate: ExecutionCandidate): ExecutionCandidate {
   return {
-    ...candidate,
-    provider: { ...candidate.provider },
-    runtime: { ...candidate.runtime },
-    model: { ...candidate.model },
-    effort: { ...candidate.effort },
-    context: { ...candidate.context },
+    id: candidate.id,
+    provider: { id: candidate.provider.id, ...(candidate.provider.displayName ? { displayName: candidate.provider.displayName } : {}) },
+    runtime: { id: candidate.runtime.id, kind: candidate.runtime.kind, ...(candidate.runtime.displayName ? { displayName: candidate.runtime.displayName } : {}) },
+    model: { id: candidate.model.id, ...(candidate.model.displayName ? { displayName: candidate.model.displayName } : {}) },
+    effort: { normalized: candidate.effort.normalized, sourceId: candidate.effort.sourceId, ...(candidate.effort.sourceLabel ? { sourceLabel: candidate.effort.sourceLabel } : {}) },
+    context: { windowTokens: candidate.context.windowTokens, maxOutputTokens: candidate.context.maxOutputTokens },
     capabilities: [...candidate.capabilities],
-    availability: { ...candidate.availability, ...(candidate.availability.reason ? { reason: { ...candidate.availability.reason } } : {}) },
-    pricing: { ...candidate.pricing, dimensions: candidate.pricing.dimensions.map((dimension) => ({ ...dimension })) },
-    privacy: { ...candidate.privacy, ...(candidate.privacy.dataResidency ? { dataResidency: [...candidate.privacy.dataResidency] } : {}) },
-    tools: { ...candidate.tools, supported: [...candidate.tools.supported] },
-    source: { ...candidate.source, original: cloneJson(candidate.source.original) }
+    availability: {
+      state: candidate.availability.state,
+      checkedAt: candidate.availability.checkedAt,
+      validUntil: candidate.availability.validUntil,
+      ...(candidate.availability.reason
+        ? {
+            reason: {
+              code: candidate.availability.reason.code,
+              ...(candidate.availability.reason.detail ? { detail: candidate.availability.reason.detail } : {})
+            }
+          }
+        : {})
+    },
+    pricing: {
+      observedAt: candidate.pricing.observedAt,
+      validUntil: candidate.pricing.validUntil,
+      dimensions: candidate.pricing.dimensions.map((dimension) => ({
+        kind: dimension.kind,
+        amount: dimension.amount,
+        currency: dimension.currency,
+        unit: dimension.unit,
+        per: dimension.per,
+        sourceUnit: dimension.sourceUnit
+      }))
+    },
+    privacy: {
+      boundary: candidate.privacy.boundary,
+      ...(candidate.privacy.dataResidency ? { dataResidency: [...candidate.privacy.dataResidency] } : {}),
+      trainingUse: candidate.privacy.trainingUse,
+      ...(candidate.privacy.retention ? { retention: candidate.privacy.retention } : {})
+    },
+    tools: {
+      mode: candidate.tools.mode,
+      supported: [...candidate.tools.supported],
+      parallelCalls: candidate.tools.parallelCalls,
+      requiresApproval: candidate.tools.requiresApproval
+    },
+    source: { adapterId: candidate.source.adapterId, candidateRef: candidate.source.candidateRef, retrievedAt: candidate.source.retrievedAt }
   }
 }
 
