@@ -1,6 +1,7 @@
 import type { ExecutionBudgetDecision, ExecutionRecoveryBudgetDecision } from './budget'
+import { assertExecutionOutcomeEvidence, type ExecutionOutcomeEvidence } from './calibration'
 import { stableFingerprint } from './overrides'
-import { assertExecutionPlanDecision, type ExactCostEvidence, type ExecutionPlanDecision, type ExecutionPlanExclusionCode, type ExecutionPlanTieBreakDecision } from './plans'
+import { assertExecutionPlanDecision, type BillableUsageP95, type ExactCostEvidence, type ExecutionPlanDecision, type ExecutionPlanExclusionCode, type ExecutionPlanTieBreakDecision } from './plans'
 import { assertExecutionLineage, type ExecutionLineage, type ExecutionLineageTerminalState, type ExecutionObservedOutcome, type ExecutionReplanTrigger } from './replanning'
 
 const FINGERPRINT = /^[a-f0-9]{64}$/
@@ -17,6 +18,7 @@ const EXPLANATION_FIELDS = [
   'tieBreaks',
   'authority',
   'lineage',
+  'outcomes',
   'evidenceRefs'
 ] as const
 
@@ -74,6 +76,26 @@ export interface ExecutionLineageExplanation {
   invalidatedPermitIds: string[]
 }
 
+export interface ExecutionOutcomeExplanation {
+  outcomeId: string
+  eventId: string
+  runId: string
+  attemptId: string
+  nodeId: string
+  candidateId: string
+  occurredAt: string
+  receivedAt: string
+  outcome: ExecutionOutcomeEvidence['outcome']
+  actualUsage: BillableUsageP95
+  metering: ExecutionOutcomeEvidence['metering']
+  latencyMs: number | null
+  validation: ExecutionOutcomeEvidence['validation']
+  retryOrdinal: number
+  fallbackReason?: ExecutionOutcomeEvidence['fallbackReason']
+  sourceKind: ExecutionOutcomeEvidence['sourceKind']
+  evidenceRefs: string[]
+}
+
 export interface ExecutionDecisionExplanation {
   schemaVersion: 1
   id: string
@@ -87,12 +109,14 @@ export interface ExecutionDecisionExplanation {
   tieBreaks: ExecutionPlanTieBreakDecision[]
   authority?: ExecutionAuthorityExplanation
   lineage?: ExecutionLineageExplanation
+  outcomes: ExecutionOutcomeExplanation[]
   evidenceRefs: string[]
 }
 
 export interface ExecutionExplanationInput {
   budgetDecision?: ExecutionBudgetDecision | ExecutionRecoveryBudgetDecision
   lineage?: ExecutionLineage
+  outcomes?: readonly ExecutionOutcomeEvidence[]
 }
 
 export class ExecutionExplanationContractError extends Error {
@@ -198,7 +222,7 @@ export function explainExecutionDecision(planValue: unknown, input: ExecutionExp
   assertExecutionPlanDecision(planValue)
   const plan = planValue
   if (input === null || typeof input !== 'object' || Array.isArray(input)) throw new ExecutionExplanationContractError(['explanation input must be an object'])
-  const unknown = Object.keys(input).filter((field) => !['budgetDecision', 'lineage'].includes(field))
+  const unknown = Object.keys(input).filter((field) => !['budgetDecision', 'lineage', 'outcomes'].includes(field))
   if (unknown.length) throw new ExecutionExplanationContractError([`explanation input contains unsupported fields: ${unknown.sort().join(', ')}`])
   const lineage = input.lineage
   if (lineage) {
@@ -209,6 +233,32 @@ export function explainExecutionDecision(planValue: unknown, input: ExecutionExp
   const evidenceRefs = new Set(plan.selected?.evidenceRefs ?? [])
   for (const attempt of lineage?.attempts ?? []) for (const reference of attempt.evidenceRefs) evidenceRefs.add(reference)
   for (const reference of input.budgetDecision?.challenge?.justification.evidenceRefs ?? []) evidenceRefs.add(reference)
+  const outcomes = [...(input.outcomes ?? [])]
+    .map((outcome) => {
+      assertExecutionOutcomeEvidence(outcome)
+      if (outcome.binding.planDecisionId !== plan.id) throw new ExecutionExplanationContractError(['outcome evidence must reference the explained plan'])
+      for (const reference of outcome.evidenceRefs) evidenceRefs.add(reference)
+      return {
+        outcomeId: outcome.id,
+        eventId: outcome.eventId,
+        runId: outcome.binding.runId,
+        attemptId: outcome.binding.attemptId,
+        nodeId: outcome.binding.nodeId,
+        candidateId: outcome.binding.candidateId,
+        occurredAt: outcome.occurredAt,
+        receivedAt: outcome.receivedAt,
+        outcome: outcome.outcome,
+        actualUsage: { ...outcome.actualUsage },
+        metering: outcome.metering,
+        latencyMs: outcome.latencyMs,
+        validation: { result: outcome.validation.result, checks: [...outcome.validation.checks].sort() },
+        retryOrdinal: outcome.binding.retryOrdinal,
+        ...(outcome.fallbackReason ? { fallbackReason: outcome.fallbackReason } : {}),
+        sourceKind: outcome.sourceKind,
+        evidenceRefs: [...outcome.evidenceRefs].sort()
+      }
+    })
+    .sort((left, right) => `${left.receivedAt}/${left.outcomeId}`.localeCompare(`${right.receivedAt}/${right.outcomeId}`))
   const payload: Omit<ExecutionDecisionExplanation, 'id'> = {
     schemaVersion: 1,
     planDecisionId: plan.id,
@@ -248,6 +298,7 @@ export function explainExecutionDecision(planValue: unknown, input: ExecutionExp
           }
         }
       : {}),
+    outcomes,
     evidenceRefs: [...evidenceRefs].sort()
   }
   return freeze({ ...payload, id: stableFingerprint(payload) })
