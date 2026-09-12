@@ -1,3 +1,5 @@
 export * from './types'
 export * from './catalogue'
 export * from './requirements'
+export * from './overrides'
+export * from './classifier'
