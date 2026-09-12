@@ -8,12 +8,20 @@ import type {
   RequirementDecision,
   RequirementDecisionReason,
   RequirementEffort,
+  ValidationCheck,
   ValidationRigor
 } from './requirements'
+import type { PrivacyBoundary, TrainingUse } from './types'
 
-const SAFE_ID = /^[a-z0-9][a-z0-9._:/-]*$/i
+const SAFE_ID = /^[a-z0-9][a-z0-9._:/-]{0,127}$/i
+const SECRET_LIKE = /(?:\bBearer\s+|\b(?:sk|gh[pousr]|github_pat|xox[baprs])[_-]|\beyJ[a-zA-Z0-9_-]{8,}\.)/i
 const EFFORT_ORDER: RequirementEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
 const VALIDATION_ORDER: ValidationRigor[] = ['self-check', 'automated-checks', 'independent-review', 'independent-review-and-tests']
+const CAPABILITIES: ExecutionCapability[] = ['text', 'code', 'repository-analysis', 'system-design', 'security-analysis', 'tool-use', 'long-context']
+const VALIDATION_CHECKS: ValidationCheck[] = ['self-review', 'type-check', 'automated-tests', 'integration-tests', 'independent-review', 'security-tests']
+const PRIVACY_BOUNDARIES: PrivacyBoundary[] = ['local-device', 'customer-controlled', 'provider-managed', 'unknown']
+const TRAINING_USE: TrainingUse[] = ['none', 'opt-in', 'opt-out', 'unknown']
+const OVERRIDE_FIELDS = ['id', 'source', 'reference', 'appliesTo', 'changes'] as const
 const PATCH_FIELDS: Array<keyof ExecutionRequirementPatch> = [
   'minimumEffort',
   'requiredCapabilities',
@@ -73,16 +81,63 @@ function sortedUnique<T extends string>(values: readonly T[]): T[] {
 }
 
 function decision(override: ExecutionRequirementOverride, field: keyof ExecutionRequirementPatch, status: RequirementDecision['status'], reason: RequirementDecisionReason): RequirementDecision {
-  return { overrideId: override.id, source: override.source, reference: override.reference, field, status, reason }
+  return { overrideId: override.id, source: override.source, reference: override.reference, appliesTo: override.appliesTo, field, status, reason }
+}
+
+function assertPlainObject(value: unknown, label: string): asserts value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object.`)
+}
+
+function assertSafeId(value: unknown, label: string): asserts value is string {
+  if (typeof value !== 'string' || !SAFE_ID.test(value) || SECRET_LIKE.test(value)) throw new Error(`${label} must be a safe public identifier.`)
+}
+
+function assertEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): void {
+  if (typeof value !== 'string' || !allowed.includes(value as T)) throw new Error(`${label} has an unsupported value.`)
+}
+
+function assertEnumArray<T extends string>(value: unknown, allowed: readonly T[], label: string): void {
+  if (!Array.isArray(value) || !value.length) throw new Error(`${label} must be a non-empty array.`)
+  for (const entry of value) assertEnum(entry, allowed, label)
+  if (new Set(value).size !== value.length) throw new Error(`${label} must not contain duplicates.`)
+}
+
+function assertIdArray(value: unknown, label: string): void {
+  if (!Array.isArray(value) || !value.length) throw new Error(`${label} must be a non-empty array.`)
+  for (const entry of value) assertSafeId(entry, label)
+  if (new Set(value).size !== value.length) throw new Error(`${label} must not contain duplicates.`)
 }
 
 function validateOverride(override: ExecutionRequirementOverride): void {
-  if (!SAFE_ID.test(override.id)) throw new Error('Execution requirement override ID must be a safe non-empty identifier.')
-  if (!SAFE_ID.test(override.reference)) throw new Error(`Execution requirement override '${override.id}' reference must be a safe non-empty identifier.`)
+  assertPlainObject(override, 'Execution requirement override')
+  const unknownOverrideFields = Object.keys(override).filter((field) => !OVERRIDE_FIELDS.includes(field as (typeof OVERRIDE_FIELDS)[number]))
+  if (unknownOverrideFields.length) throw new Error(`Execution requirement override contains unsupported fields: ${unknownOverrideFields.sort().join(', ')}.`)
+  assertSafeId(override.id, 'Execution requirement override ID')
+  assertSafeId(override.reference, `Execution requirement override '${override.id}' reference`)
   if (!['workflow', 'user'].includes(override.source)) throw new Error(`Execution requirement override '${override.id}' has an unsupported source.`)
   if (!['this-task', 'future-replans'].includes(override.appliesTo)) throw new Error(`Execution requirement override '${override.id}' has unsupported replanning scope.`)
+  assertPlainObject(override.changes, `Execution requirement override '${override.id}' changes`)
   const unknown = Object.keys(override.changes).filter((field) => !PATCH_FIELDS.includes(field as keyof ExecutionRequirementPatch))
   if (unknown.length) throw new Error(`Execution requirement override '${override.id}' contains unsupported fields: ${unknown.sort().join(', ')}.`)
+  const changes = override.changes
+  if (changes.minimumEffort !== undefined) assertEnum(changes.minimumEffort, EFFORT_ORDER, 'Minimum effort')
+  if (changes.requiredCapabilities !== undefined) assertEnumArray(changes.requiredCapabilities, CAPABILITIES, 'Required capabilities')
+  if (changes.validationMinimum !== undefined) assertEnum(changes.validationMinimum, VALIDATION_ORDER, 'Validation minimum')
+  if (changes.requiredChecks !== undefined) assertEnumArray(changes.requiredChecks, VALIDATION_CHECKS, 'Required checks')
+  if (changes.contextMode !== undefined) assertEnum(changes.contextMode, ['partitionable', 'single-candidate'], 'Context mode')
+  if (changes.allowedPrivacyBoundaries !== undefined) assertEnumArray(changes.allowedPrivacyBoundaries, PRIVACY_BOUNDARIES, 'Allowed privacy boundaries')
+  if (changes.allowedTrainingUse !== undefined) assertEnumArray(changes.allowedTrainingUse, TRAINING_USE, 'Allowed training use')
+  if (changes.requiredTools !== undefined) assertIdArray(changes.requiredTools, 'Required tools')
+  if (changes.forbiddenTools !== undefined) assertIdArray(changes.forbiddenTools, 'Forbidden tools')
+  if (changes.requireApproval !== undefined && typeof changes.requireApproval !== 'boolean') throw new Error('Approval requirement must be a boolean.')
+  for (const field of ['minimumWindowTokens', 'minimumOutputTokens'] as const) {
+    const value = changes[field]
+    if (value !== undefined && (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0)) throw new Error(`Execution requirement '${field}' must be a positive safe integer.`)
+  }
+  for (const field of ['maximumPlanP95Ms', 'maxRetentionDays'] as const) {
+    const value = changes[field]
+    if (value !== undefined && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)) throw new Error(`Execution requirement '${field}' must be a non-negative safe integer.`)
+  }
 }
 
 function mergeRanked<T extends string>(current: T, requested: T, order: readonly T[]): { value: T; status: RequirementDecision['status']; reason: RequirementDecisionReason } {

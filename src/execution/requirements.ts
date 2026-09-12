@@ -70,6 +70,7 @@ export interface RequirementDecision {
   overrideId: string
   source: ExecutionRequirementOverride['source']
   reference: string
+  appliesTo: ExecutionRequirementOverride['appliesTo']
   field: keyof ExecutionRequirementPatch
   status: 'applied' | 'rejected'
   reason: RequirementDecisionReason
