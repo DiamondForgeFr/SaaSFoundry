@@ -107,6 +107,8 @@ export interface QualifiedExecutionPlan {
   maximumPathP95: ExactCostEvidence
 }
 
+export type ExecutionPlanQualificationResult = { status: 'qualified'; plan: QualifiedExecutionPlan } | { status: 'excluded'; exclusions: ExecutionPlanExclusion[] }
+
 export type ExecutionPlanExclusionCode =
   | 'requirements-unsatisfiable'
   | 'invalid-proposal'
