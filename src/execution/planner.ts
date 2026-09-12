@@ -56,7 +56,7 @@ function comparePlan(left: QualifiedExecutionPlan, right: QualifiedExecutionPlan
   return left.proposalId.localeCompare(right.proposalId) || left.proposalFingerprint.localeCompare(right.proposalFingerprint)
 }
 
-function canonicalCatalogue(catalogue: ExecutionCandidateCatalogueSnapshot): ExecutionCandidateCatalogueSnapshot {
+export function canonicalExecutionCandidateCatalogue(catalogue: ExecutionCandidateCatalogueSnapshot): ExecutionCandidateCatalogueSnapshot {
   return {
     ...catalogue,
     eligible: catalogue.eligible
@@ -77,6 +77,10 @@ function canonicalCatalogue(catalogue: ExecutionCandidateCatalogueSnapshot): Exe
       return leftId.localeCompare(rightId)
     })
   }
+}
+
+export function fingerprintExecutionCandidateCatalogue(catalogue: ExecutionCandidateCatalogueSnapshot): string {
+  return stableFingerprint(canonicalExecutionCandidateCatalogue(catalogue))
 }
 
 function freeze<T>(value: T): T {
@@ -122,7 +126,7 @@ export function selectMinimumCostExecutionPlan(
   const tieBreakDecisions: ExecutionPlanTieBreakDecision[] = selected
     ? qualified.slice(1).map((loser) => ({ winnerProposalId: selected.proposalId, loserProposalId: loser.proposalId, rule: decidingRule(selected, loser, policy) }))
     : []
-  const catalogueFingerprint = stableFingerprint(canonicalCatalogue(catalogue))
+  const catalogueFingerprint = fingerprintExecutionCandidateCatalogue(catalogue)
   return finalize({
     schemaVersion: 1,
     status: requirements.resolution.status === 'unsatisfiable' ? 'requirements-unsatisfiable' : selected ? 'selected' : 'unplannable',

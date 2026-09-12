@@ -40,6 +40,7 @@ const QUALIFIED_FIELDS = [
   'rootBoundary',
   'nodeCount',
   'maximumPathLatencyP95Ms',
+  'validUntil',
   'approvalRequired',
   'checks',
   'evidenceRefs',
@@ -171,6 +172,8 @@ export interface QualifiedExecutionPlan {
   rootBoundary: string
   nodeCount: number
   maximumPathLatencyP95Ms: number | null
+  /** Exclusive freshness boundary for all reachable estimates, candidates, and prices. */
+  validUntil: string
   approvalRequired: boolean
   checks: ValidationCheck[]
   evidenceRefs: string[]
@@ -357,6 +360,7 @@ function validateQualifiedPlan(value: unknown, label: string, issues: string[]):
   if (!Number.isSafeInteger(value.nodeCount) || Number(value.nodeCount) < 1) issues.push(`${label}.nodeCount must be a positive safe integer`)
   if (value.maximumPathLatencyP95Ms !== null && (!Number.isSafeInteger(value.maximumPathLatencyP95Ms) || Number(value.maximumPathLatencyP95Ms) < 0))
     issues.push(`${label}.maximumPathLatencyP95Ms must be a non-negative safe integer or null`)
+  if (!timestamp(value.validUntil)) issues.push(`${label}.validUntil must be a canonical UTC timestamp`)
   if (typeof value.approvalRequired !== 'boolean') issues.push(`${label}.approvalRequired must be a boolean`)
   validateUniqueIds(value.checks, CHECKS, `${label}.checks`, issues)
   validateUniqueIds(value.evidenceRefs, null, `${label}.evidenceRefs`, issues)

@@ -1,5 +1,5 @@
 import { stableFingerprint } from './overrides'
-import { ExactRational, exactCostEvidence } from './exact-cost'
+import { calculateExactUsageCost, ExactRational, exactCostEvidence } from './exact-cost'
 import {
   assertExecutionPlanProposal,
   type ExecutionPlanExclusion,
@@ -10,19 +10,9 @@ import {
   type QualifiedExecutionPlan
 } from './plans'
 import type { ExecutionRequirementSet, RequirementEffort, ValidationCheck } from './requirements'
-import type { ExecutionCandidate, ExecutionCandidateCatalogueSnapshot, NormalizedEffort, PriceDimensionKind, PriceUnit } from './types'
+import type { ExecutionCandidateCatalogueSnapshot, NormalizedEffort } from './types'
 
 const EFFORT_ORDER: NormalizedEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
-const DIMENSION_UNIT: Record<PriceDimensionKind, PriceUnit> = {
-  'input-token': 'token',
-  'output-token': 'token',
-  'cached-input-token': 'token',
-  request: 'request',
-  second: 'second',
-  minute: 'minute',
-  'tool-call': 'call'
-}
-const INTEGER_DIMENSIONS = new Set<PriceDimensionKind>(['input-token', 'output-token', 'cached-input-token', 'request', 'tool-call'])
 const POLICY_TIE_BREAKERS = new Set(['lower-max-path-cost', 'lower-p95-latency', 'fewer-nodes', 'prefer-local', 'higher-effort'])
 
 function excluded(proposalId: string, code: ExecutionPlanExclusion['code'], detailCode: string, node?: ExecutionPlanNode): ExecutionPlanExclusion {
@@ -133,31 +123,6 @@ function maximumPathLatency(id: string, graphValue: Graph, memo = new Map<string
   return value
 }
 
-function candidateNodeCost(node: ExecutionPlanNode, candidate: ExecutionCandidate, currency: string): ExactRational | { code: ExecutionPlanExclusion['code']; detail: string } {
-  const rates = new Map<PriceDimensionKind, ExecutionCandidate['pricing']['dimensions'][number]>()
-  for (const rate of candidate.pricing.dimensions) {
-    if (rates.has(rate.kind)) return { code: 'price-incomplete', detail: 'duplicate-price-dimension' }
-    if (rate.currency !== currency) return { code: 'currency-uncomparable', detail: 'settlement-currency-mismatch' }
-    if (rate.unit !== DIMENSION_UNIT[rate.kind]) return { code: 'price-incomplete', detail: 'incompatible-normalized-unit' }
-    rates.set(rate.kind, rate)
-  }
-  const usage = Object.entries(node.estimate.usageP95) as Array<[PriceDimensionKind, string]>
-  if (usage.length === 0 || rates.size === 0) return { code: 'price-incomplete', detail: 'explicit-usage-and-prices-required' }
-  for (const kind of rates.keys()) if (!Object.prototype.hasOwnProperty.call(node.estimate.usageP95, kind)) return { code: 'price-incomplete', detail: 'usage-missing-for-priced-dimension' }
-  let total = new ExactRational(0n)
-  for (const [kind, quantityValue] of usage) {
-    if (INTEGER_DIMENSIONS.has(kind) && quantityValue.includes('.')) return { code: 'price-incomplete', detail: 'fractional-discrete-usage' }
-    const quantity = ExactRational.decimal(quantityValue)
-    const rate = rates.get(kind)
-    if (!rate) {
-      if (quantity.numerator > 0n) return { code: 'price-incomplete', detail: 'price-missing-for-positive-usage' }
-      continue
-    }
-    total = total.add(quantity.multiply(ExactRational.decimal(rate.amount)).divide(BigInt(rate.per)))
-  }
-  return total
-}
-
 function effortSatisfies(actual: NormalizedEffort, required: RequirementEffort): boolean {
   return actual !== 'custom' && EFFORT_ORDER.indexOf(actual) >= EFFORT_ORDER.indexOf(required)
 }
@@ -256,7 +221,7 @@ export function qualifyAndCostExecutionPlan(
 
   const nodeCost = new Map<string, ExactRational>()
   for (const node of graphValue.order) {
-    const result = candidateNodeCost(node, candidates.get(node.candidateId)!, policy.settlementCurrency)
+    const result = calculateExactUsageCost(node.estimate.usageP95, candidates.get(node.candidateId)!, policy.settlementCurrency)
     if (!(result instanceof ExactRational)) return { status: 'excluded', exclusions: [{ ...excluded(proposal.id, result.code, result.detail, node), proposalFingerprint }] }
     nodeCost.set(node.id, result)
   }
@@ -281,6 +246,10 @@ export function qualifyAndCostExecutionPlan(
   }
   const maximum = maximumCost(proposal.rootNodeId)
   const rootCandidate = candidates.get(graphValue.nodes.get(proposal.rootNodeId)!.candidateId)!
+  const validUntil = proposal.nodes.reduce((earliest, node) => {
+    const candidate = candidates.get(node.candidateId)!
+    return [earliest, node.estimate.validUntil, candidate.availability.validUntil, candidate.pricing.validUntil].sort()[0]
+  }, '9999-12-31T23:59:59.999Z')
   const plan: QualifiedExecutionPlan = {
     proposalId: proposal.id,
     proposalFingerprint,
@@ -290,6 +259,7 @@ export function qualifyAndCostExecutionPlan(
     rootBoundary: rootCandidate.privacy.boundary,
     nodeCount: proposal.nodes.length,
     maximumPathLatencyP95Ms: pathLatency,
+    validUntil,
     approvalRequired,
     checks: [...checks].sort(),
     evidenceRefs: [...new Set(proposal.nodes.flatMap((node) => [node.estimate.evidenceRef, ...node.outcomes.map((outcome) => outcome.evidenceRef)]))].sort(),
