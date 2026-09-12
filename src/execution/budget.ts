@@ -2,7 +2,8 @@ import { assertExecutionCandidate } from './catalogue'
 import { assertExactCostEvidence, calculateExactUsageCost, compareExactCosts, ExactRational, exactCostEvidence } from './exact-cost'
 import { stableFingerprint } from './overrides'
 import { assertExecutionPlanDecision, type BillableUsageP95, type ExactCostEvidence, type ExecutionPlanDecision, type ExecutionPlanSelectionPolicy } from './plans'
-import { fingerprintExecutionCandidateCatalogue } from './planner'
+import { fingerprintExecutionCandidateCatalogue, selectMinimumCostExecutionPlan } from './planner'
+import type { ExecutionRequirementSet } from './requirements'
 import type { ExecutionCandidateCatalogueSnapshot, NormalizedEffort, PriceDimensionKind } from './types'
 
 const SAFE_ID = /^[a-z0-9][a-z0-9._:/-]{0,127}$/i
@@ -42,6 +43,7 @@ export type ExecutionBudgetDecisionReasonCode =
   | 'plan-exceeds-session-authority'
   | 'approval-granted'
   | 'approval-scope-mismatch'
+  | 'approval-host-rejected'
   | 'requirements-unsatisfiable'
   | 'no-qualified-plan'
 
@@ -142,6 +144,8 @@ export interface ExecutionBudgetDecision {
   expectedAggregateP95?: ExactCostEvidence
   maximumPathP95?: ExactCostEvidence
   baselineP95: ExactCostEvidence
+  /** True only when monetary authority and every independent approval are satisfied. */
+  dispatchAuthorized: boolean
   nonMonetaryApprovalRequired: boolean
   challenge?: ExecutionBudgetApprovalChallenge
   approvalEventId?: string
@@ -151,6 +155,17 @@ export interface ExecutionBudgetAuthorizationInput {
   evaluatedAt: string
   justification?: unknown
   approval?: unknown
+}
+
+/**
+ * Required host trust boundary. The host owns the authoritative planner inputs,
+ * authenticates the active session, and atomically consumes approval events.
+ */
+export interface ExecutionBudgetHostAuthority {
+  requirements: ExecutionRequirementSet
+  proposals: readonly unknown[]
+  verifySessionEvidence(evidence: Readonly<SessionWorkloadEvidence>): boolean
+  consumeApprovalGrant(grant: Readonly<ExecutionBudgetApprovalGrant>, challenge: Readonly<ExecutionBudgetApprovalChallenge>): boolean
 }
 
 export class ExecutionBudgetContractError extends Error {
@@ -397,11 +412,33 @@ export function authorizeExecutionPlan(
   sessionValue: unknown,
   catalogue: ExecutionCandidateCatalogueSnapshot,
   policy: ExecutionPlanSelectionPolicy,
-  input: ExecutionBudgetAuthorizationInput
+  input: ExecutionBudgetAuthorizationInput,
+  host: ExecutionBudgetHostAuthority
 ): ExecutionBudgetDecision {
   assertExecutionPlanDecision(planValue)
   const plan = planValue
   const envelope = deriveSessionBudgetEnvelope(sessionValue, catalogue, policy)
+  if (!object(host) || !Array.isArray(host.proposals) || !object(host.requirements) || typeof host.verifySessionEvidence !== 'function' || typeof host.consumeApprovalGrant !== 'function')
+    throw new ExecutionBudgetContractError(['host authority must supply planner evidence and authentication callbacks'])
+  const recomputedPlan = selectMinimumCostExecutionPlan(host.proposals, host.requirements as ExecutionRequirementSet, catalogue, policy)
+  if (recomputedPlan.id !== plan.id) throw new ExecutionBudgetContractError(['plan decision must match recomputed authoritative planner evidence'])
+  const normalizedSession = freeze({
+    schemaVersion: 1 as const,
+    sessionId: envelope.sessionId,
+    candidateId: envelope.candidateId,
+    usageP95: canonicalUsage((sessionValue as SessionWorkloadEvidence).usageP95, []),
+    observedAt: (sessionValue as SessionWorkloadEvidence).observedAt,
+    validUntil: (sessionValue as SessionWorkloadEvidence).validUntil,
+    evidenceRef: (sessionValue as SessionWorkloadEvidence).evidenceRef,
+    authorityRevision: envelope.authorityRevision
+  })
+  let sessionVerified = false
+  try {
+    sessionVerified = host.verifySessionEvidence(normalizedSession) === true
+  } catch {
+    sessionVerified = false
+  }
+  if (!sessionVerified) throw new ExecutionBudgetContractError(['host did not authenticate the active session evidence'])
   if (!object(input)) throw new ExecutionBudgetContractError(['authorization input must be an object'])
   const inputIssues: string[] = []
   rejectUnknown(input, AUTHORIZATION_FIELDS, 'authorization input', inputIssues)
@@ -419,6 +456,7 @@ export function authorizeExecutionPlan(
     authorityRevision: envelope.authorityRevision,
     currency: envelope.currency,
     baselineP95: envelope.baselineP95,
+    dispatchAuthorized: false,
     nonMonetaryApprovalRequired: plan.selected?.approvalRequired ?? false
   }
   if (plan.status !== 'selected' || !plan.selected)
@@ -446,17 +484,25 @@ export function authorizeExecutionPlan(
   }
   if (withinExpected && withinPath) {
     if (input.approval !== undefined) throw new ExecutionBudgetContractError(['approval must not be attached when the plan is within session authority'])
-    return decision({ ...selectedCommon, status: 'authorized', mode: 'automatic', reasonCode: 'within-session-authority' })
+    return decision({ ...selectedCommon, status: 'authorized', mode: 'automatic', reasonCode: 'within-session-authority', dispatchAuthorized: !selected.approvalRequired })
   }
   const approvalChallenge = challenge(plan, envelope, validateJustification(input.justification))
   if (input.approval === undefined) return decision({ ...selectedCommon, status: 'approval-required', mode: null, reasonCode: 'plan-exceeds-session-authority', challenge: approvalChallenge })
   if (!validateGrant(input.approval, approvalChallenge, input.evaluatedAt))
     return decision({ ...selectedCommon, status: 'rejected', mode: null, reasonCode: 'approval-scope-mismatch', challenge: approvalChallenge })
+  let consumed = false
+  try {
+    consumed = host.consumeApprovalGrant(input.approval, approvalChallenge) === true
+  } catch {
+    consumed = false
+  }
+  if (!consumed) return decision({ ...selectedCommon, status: 'rejected', mode: null, reasonCode: 'approval-host-rejected', challenge: approvalChallenge })
   return decision({
     ...selectedCommon,
     status: 'authorized',
     mode: 'approved-increment',
     reasonCode: 'approval-granted',
+    dispatchAuthorized: !selected.approvalRequired,
     challenge: approvalChallenge,
     approvalEventId: input.approval.id
   })

@@ -61,4 +61,23 @@ describe('execution plan public contract (#723)', () => {
     expect(() => assertExecutionPlanProposal(value)).toThrow(/safe public identifier/)
     expect(() => assertExecutionPlanProposal(value)).not.toThrow(/secret-secret-secret/)
   })
+
+  it('bounds decimal precision and execution-tree fanout before exact arithmetic', () => {
+    const longProbability = proposal()
+    longProbability.nodes[0].outcomes[0].conditionalProbability = `0.${'0'.repeat(256)}1`
+    expect(() => assertExecutionPlanProposal(longProbability)).toThrow(/bounded non-negative decimal/)
+
+    const tooManyNodes = proposal()
+    tooManyNodes.nodes = Array.from({ length: 65 }, (_, index) => ({
+      ...tooManyNodes.nodes[0],
+      id: `node-${index}`,
+      outcomes: [{ code: 'success' as const, conditionalProbability: '1', evidenceRef: `rates/node-${index}` }]
+    }))
+    tooManyNodes.rootNodeId = 'node-0'
+    expect(() => assertExecutionPlanProposal(tooManyNodes)).toThrow(/between 1 and 64/)
+
+    const tooManyOutcomes = proposal()
+    tooManyOutcomes.nodes[0].outcomes = Array.from({ length: 17 }, (_, index) => ({ code: 'success' as const, conditionalProbability: '0.1', evidenceRef: `rates/outcome-${index}` }))
+    expect(() => assertExecutionPlanProposal(tooManyOutcomes)).toThrow(/between 1 and 16/)
+  })
 })
