@@ -108,7 +108,11 @@ function semanticFingerprint(proposal: ExecutionPlanProposal): string {
         ...node,
         tools: [...node.tools].sort(),
         checks: [...node.checks].sort(),
-        outcomes: [...node.outcomes].sort((left, right) => `${left.code}/${left.nextNodeId ?? ''}/${left.evidenceRef}`.localeCompare(`${right.code}/${right.nextNodeId ?? ''}/${right.evidenceRef}`))
+        outcomes: [...node.outcomes].sort((left, right) =>
+          `${left.code}/${left.nextNodeId ?? ''}/${left.evidenceRef}/${left.conditionalProbability}`.localeCompare(
+            `${right.code}/${right.nextNodeId ?? ''}/${right.evidenceRef}/${right.conditionalProbability}`
+          )
+        )
       }))
       .sort((left, right) => left.id.localeCompare(right.id))
   })
@@ -217,8 +221,11 @@ export function qualifyAndCostExecutionPlan(
   catalogue: ExecutionCandidateCatalogueSnapshot,
   policy: ExecutionPlanSelectionPolicy
 ): ExecutionPlanQualificationResult {
+  const rawProposalId = typeof proposalValue === 'object' && proposalValue !== null ? (proposalValue as { id?: unknown }).id : undefined
   const proposalId =
-    typeof proposalValue === 'object' && proposalValue !== null && typeof (proposalValue as { id?: unknown }).id === 'string' ? (proposalValue as { id: string }).id : 'unknown-proposal'
+    typeof rawProposalId === 'string' && /^[a-z0-9][a-z0-9._:/-]{0,127}$/i.test(rawProposalId) && !/(?:\bBearer\s+|\b(?:sk|gh[pousr]|github_pat|xox[baprs])[_-])/i.test(rawProposalId)
+      ? rawProposalId
+      : 'unknown-proposal'
   try {
     assertExecutionPlanProposal(proposalValue)
     validatePolicy(policy)
@@ -331,11 +338,13 @@ export function qualifyAndCostExecutionPlan(
     proposalFingerprint,
     rootCandidateId: rootCandidate.id,
     rootEffort: rootCandidate.effort.normalized,
+    rootRuntimeKind: rootCandidate.runtime.kind,
     rootBoundary: rootCandidate.privacy.boundary,
     nodeCount: proposal.nodes.length,
     maximumPathLatencyP95Ms: pathLatency,
     approvalRequired,
     checks: [...checks].sort(),
+    evidenceRefs: [...new Set(proposal.nodes.flatMap((node) => [node.estimate.evidenceRef, ...node.outcomes.map((outcome) => outcome.evidenceRef)]))].sort(),
     nodeCosts: graphValue.order
       .map((node) => ({
         nodeId: node.id,
