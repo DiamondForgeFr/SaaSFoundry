@@ -1,9 +1,20 @@
-import type { ExactCostEvidence } from './plans'
+import type { BillableUsageP95, ExactCostEvidence } from './plans'
+import type { ExecutionCandidate, PriceDimensionKind, PriceUnit } from './types'
 
 const NON_NEGATIVE_DECIMAL = /^(?:0|[1-9]\d*)(?:\.\d+)?$/
 const INTEGER = /^(?:0|[1-9]\d*)$/
 const CURRENCY = /^[A-Z]{3}$/
 const MAX_DIGITS = 256
+const DIMENSION_UNIT: Record<PriceDimensionKind, PriceUnit> = {
+  'input-token': 'token',
+  'output-token': 'token',
+  'cached-input-token': 'token',
+  request: 'request',
+  second: 'second',
+  minute: 'minute',
+  'tool-call': 'call'
+}
+const INTEGER_DIMENSIONS = new Set<PriceDimensionKind>(['input-token', 'output-token', 'cached-input-token', 'request', 'tool-call'])
 
 function gcd(left: bigint, right: bigint): bigint {
   let a = left < 0n ? -left : left
@@ -103,4 +114,37 @@ export function compareExactCosts(left: ExactCostEvidence, right: ExactCostEvide
   assertExactCostEvidence(right, 'right exact cost')
   if (left.currency !== right.currency) throw new Error('Exact costs must use the same currency.')
   return ExactRational.evidence(left).compare(ExactRational.evidence(right))
+}
+
+export type ExactUsageCostIssue = { code: 'price-incomplete' | 'currency-uncomparable'; detail: string }
+
+/** Prices one declared workload using the same strict rules as execution-plan nodes. */
+export function calculateExactUsageCost(usageP95: BillableUsageP95, candidate: ExecutionCandidate, currency: string): ExactRational | ExactUsageCostIssue {
+  const rates = new Map<PriceDimensionKind, ExecutionCandidate['pricing']['dimensions'][number]>()
+  for (const rate of candidate.pricing.dimensions) {
+    if (rates.has(rate.kind)) return { code: 'price-incomplete', detail: 'duplicate-price-dimension' }
+    if (rate.currency !== currency) return { code: 'currency-uncomparable', detail: 'settlement-currency-mismatch' }
+    if (rate.unit !== DIMENSION_UNIT[rate.kind]) return { code: 'price-incomplete', detail: 'incompatible-normalized-unit' }
+    if (!Number.isSafeInteger(rate.per) || rate.per < 1) return { code: 'price-incomplete', detail: 'invalid-price-unit-size' }
+    rates.set(rate.kind, rate)
+  }
+  const usage = Object.entries(usageP95) as Array<[PriceDimensionKind, string]>
+  if (usage.length === 0 || rates.size === 0) return { code: 'price-incomplete', detail: 'explicit-usage-and-prices-required' }
+  for (const kind of rates.keys()) if (!Object.prototype.hasOwnProperty.call(usageP95, kind)) return { code: 'price-incomplete', detail: 'usage-missing-for-priced-dimension' }
+  let total = new ExactRational(0n)
+  try {
+    for (const [kind, quantityValue] of usage) {
+      if (INTEGER_DIMENSIONS.has(kind) && quantityValue.includes('.')) return { code: 'price-incomplete', detail: 'fractional-discrete-usage' }
+      const quantity = ExactRational.decimal(quantityValue)
+      const rate = rates.get(kind)
+      if (!rate) {
+        if (quantity.numerator > 0n) return { code: 'price-incomplete', detail: 'price-missing-for-positive-usage' }
+        continue
+      }
+      total = total.add(quantity.multiply(ExactRational.decimal(rate.amount)).divide(BigInt(rate.per)))
+    }
+  } catch {
+    return { code: 'price-incomplete', detail: 'invalid-price-or-usage-decimal' }
+  }
+  return total
 }
