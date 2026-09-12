@@ -91,6 +91,13 @@ describe('host capability contract (#739)', () => {
     expect(first.cpu.features.value).toEqual(['aes', 'asimd', 'sha256'])
   })
 
+  it('explains why a viable host does not qualify for the next tier', () => {
+    const result = createHostCapabilitySnapshot(observation({ total: 32, available: 8, disk: 32, accelerators: [accelerator(16)] }))
+
+    expect(result.viability.tier).toBe('coding-capable')
+    expect(result.viability.constraintCodes).toEqual(expect.arrayContaining(['total-memory-below-tier', 'available-memory-below-tier', 'storage-capacity-below-tier', 'accelerator-memory-below-tier']))
+  })
+
   it('preserves unknown facts and does not promote incomplete evidence', () => {
     const input = observation()
     input.accelerators = unknown('darwin/system-profiler/displays', 'probe-timeout')

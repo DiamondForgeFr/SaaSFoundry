@@ -104,6 +104,7 @@ export default defineConfig({
             { text: 'Project Structure', link: '/guide/project-structure' },
             { text: 'Monorepo vs Multirepo', link: '/guide/monorepo-vs-multirepo' },
             { text: 'Agent Coexistence', link: '/guide/agent-coexistence' },
+            { text: 'Host Capabilities', link: '/guide/host-capabilities' },
             { text: 'Execution Candidates', link: '/guide/execution-candidates' },
             { text: 'Execution Requirements', link: '/guide/execution-requirements' },
             { text: 'Execution Planning', link: '/guide/execution-planning' },
