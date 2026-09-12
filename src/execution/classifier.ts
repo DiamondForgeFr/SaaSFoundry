@@ -192,7 +192,8 @@ function validateIntent(intent: TaskIntent, policyRevision: string): void {
   assertPlainObject(intent, 'Task intent')
   assertClosedObject(intent, INTENT_FIELDS, 'Task intent')
   if (typeof intent.text !== 'string' || !intent.text.trim()) throw new Error('Task intent text must be a non-empty string.')
-  if (!SAFE_PUBLIC_ID.test(policyRevision) || SECRET_LIKE.test(policyRevision)) throw new Error('Execution requirement policy revision must be a safe public identifier.')
+  if (typeof policyRevision !== 'string' || !SAFE_PUBLIC_ID.test(policyRevision) || SECRET_LIKE.test(policyRevision))
+    throw new Error('Execution requirement policy revision must be a safe public identifier.')
   if (intent.categories !== undefined) assertUniqueEnumArray(intent.categories, TASK_CATEGORIES, 'Task intent categories')
   if (intent.signals !== undefined) {
     assertPlainObject(intent.signals, 'Task intent signals')
@@ -349,8 +350,8 @@ export function classifyTaskIntent(intent: TaskIntent, options: ClassifyTaskInte
   const user = options.userConstraints ?? []
   if (!Array.isArray(workflow)) throw new Error('workflowConstraints must be an array.')
   if (!Array.isArray(user)) throw new Error('userConstraints must be an array.')
-  if (workflow.some((constraint) => constraint.source !== 'workflow')) throw new Error('workflowConstraints may contain only workflow overrides.')
-  if (user.some((constraint) => constraint.source !== 'user')) throw new Error('userConstraints may contain only user overrides.')
+  if (workflow.some((constraint) => constraint?.source !== 'workflow')) throw new Error('workflowConstraints may contain only workflow overrides.')
+  if (user.some((constraint) => constraint?.source !== 'user')) throw new Error('userConstraints may contain only user overrides.')
   const requirement = baseline(intent, policyRevision)
   return applyExecutionRequirementOverrides(requirement, [...workflow, ...user])
 }

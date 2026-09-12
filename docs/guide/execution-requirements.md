@@ -60,8 +60,6 @@ collisions make the result `unsatisfiable`; the planner must stop instead of gue
 ## Reuse during planning
 
 ```ts
-import { classifyTaskIntent } from 'saasfoundryai-cli/execution'
-
 const requirements = classifyTaskIntent(
   {
     text: 'Review authentication and secret handling',

@@ -281,13 +281,13 @@ function applyOverride(target: ExecutionRequirementSet, override: ExecutionRequi
 
 export function applyExecutionRequirementOverrides(base: ExecutionRequirementSet, overrides: readonly ExecutionRequirementOverride[]): ExecutionRequirementSet {
   const target = clone(base)
+  for (const override of overrides) validateOverride(override)
   const ordered = [...overrides].sort((left, right) => {
     const sourceOrder = Number(left.source === 'user') - Number(right.source === 'user')
     return sourceOrder || left.id.localeCompare(right.id)
   })
   const seen = new Set<string>()
   for (const override of ordered) {
-    validateOverride(override)
     if (seen.has(override.id)) throw new Error(`Duplicate execution requirement override '${override.id}'.`)
     seen.add(override.id)
     applyOverride(target, override)

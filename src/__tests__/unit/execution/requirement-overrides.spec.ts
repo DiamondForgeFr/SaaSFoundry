@@ -103,5 +103,7 @@ describe('execution requirement constraint resolution (#720)', () => {
     const invalid = constraint('invalid-field', 'workflow', { minimumEffort: 'high' })
     ;(invalid.changes as unknown as Record<string, unknown>).provider = 'openai'
     expect(() => classifyTaskIntent({ text: 'Implement a task' }, { workflowConstraints: [invalid] })).toThrow('unsupported fields')
+    expect(() => classifyTaskIntent({ text: 'Implement a task' }, { workflowConstraints: [null as unknown as ExecutionRequirementOverride] })).toThrow('workflowConstraints')
+    expect(() => classifyTaskIntent({ text: 'Implement a task' }, { workflowConstraints: [{ source: 'workflow' } as ExecutionRequirementOverride] })).toThrow('safe public identifier')
   })
 })
