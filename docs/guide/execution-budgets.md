@@ -47,10 +47,12 @@ Monetary authority does not replace tool, privacy, or side-effect approval. An i
 Session workload, candidate availability, prices, plan estimates, and catalogue evidence must all be current at planning and evaluation time. Missing dimensions, missing prices, mixed currencies,
 unknown candidates, mismatched fingerprints, expired evidence, and tampered serialized values fail closed. An explicitly complete zero-price schedule remains valid, including a local runtime.
 
-If evidence changes before dispatch, the host must rebuild the catalogue, replan, and request authority again. Runtime recovery and replanning are separate from this policy. Future calibration may
-improve workload and price evidence, but it does not rewrite a completed authority decision.
+If evidence changes before dispatch, the host must rebuild the catalogue, replan, and request authority again. [Safe replanning](./execution-replanning.md) extends this policy across a bounded
+execution lineage: dispatched p95 reservations become sunk cost, and every recovery plan receives fresh authority. Future calibration may improve workload and price evidence, but it does not rewrite a
+completed authority decision.
 
-The envelope applies to one plan decision. It is not a cumulative session allowance, and p95 estimates do not guarantee the final provider invoice.
+The envelope applies to one plan decision. It is not a reusable session wallet. Replanning may compare cumulative reservations only within the current execution lineage, and p95 estimates do not
+guarantee the final provider invoice.
 
 ## Public API flow
 

@@ -36,5 +36,5 @@ do not affect the result. A more capable or higher-effort candidate remains elig
 The immutable decision ledger contains only public candidate and node identifiers, requirement/policy/catalogue/proposal fingerprints, evidence references, exact costs, stable exclusion codes, and
 tie-break decisions. It never stores task prompts, raw observations, provider payloads, configuration, or credentials.
 
-[Budget authorization](./execution-budgets.md) compares the selected complete tree with authority derived from the active user-facing session. Runtime failures and evidence changes are handled by
-replanning. Cost calibration can update future evidence, but it does not mutate a completed decision.
+[Budget authorization](./execution-budgets.md) compares the selected complete tree with authority derived from the active user-facing session. [Safe replanning](./execution-replanning.md) creates a
+new immutable decision after runtime failures, scope changes, or stale evidence. Cost calibration can update future evidence, but it does not mutate a completed decision.

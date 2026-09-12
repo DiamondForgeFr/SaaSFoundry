@@ -24,8 +24,8 @@ export type ExecutionReplanTrigger =
   | 'outcome-unknown'
 
 export type ExecutionObservedOutcome = ExecutionOutcomeCode | 'outcome-unknown'
-export type ExecutionLineageTerminalState = 'active' | 'completed' | 'aborted' | 'blocked'
-export type ExecutionAttemptStatus = 'planned' | 'running' | 'completed' | 'failed' | 'aborted'
+export type ExecutionLineageTerminalState = 'active' | 'completed' | 'cancelled' | 'blocked'
+export type ExecutionAttemptStatus = 'planned' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked'
 
 export interface ExecutionAttemptRecord {
   schemaVersion: 1
@@ -260,7 +260,7 @@ export function assertExecutionLineage(value: unknown): asserts value is Executi
   if (!Number.isSafeInteger(value.maxAttempts) || Number(value.maxAttempts) < 1 || Number(value.maxAttempts) > MAX_HISTORY) issues.push(`lineage.maxAttempts must be between 1 and ${MAX_HISTORY}`)
   if (!Number.isSafeInteger(value.maxReplans) || Number(value.maxReplans) < 0 || Number(value.maxReplans) >= Number(value.maxAttempts)) issues.push('lineage.maxReplans must be less than maxAttempts')
   if (!safeId(value.scopeRevision)) issues.push('lineage.scopeRevision must be a safe public identifier')
-  if (!['active', 'completed', 'aborted', 'blocked'].includes(value.terminalState as string)) issues.push('lineage.terminalState is unsupported')
+  if (!['active', 'completed', 'cancelled', 'blocked'].includes(value.terminalState as string)) issues.push('lineage.terminalState is unsupported')
   if (!fingerprint(value.currentAttemptId)) issues.push('lineage.currentAttemptId must be a SHA-256 fingerprint')
   if (!fingerprint(value.currentPlanDecisionId)) issues.push('lineage.currentPlanDecisionId must be a SHA-256 fingerprint')
   if (!Array.isArray(value.attempts) || value.attempts.length === 0 || value.attempts.length > MAX_HISTORY) issues.push(`lineage.attempts must contain between 1 and ${MAX_HISTORY} entries`)
@@ -304,7 +304,7 @@ export function assertExecutionLineage(value: unknown): asserts value is Executi
       else ids.add(attempt.id as string)
       if (!Number.isSafeInteger(attempt.sequence) || attempt.sequence !== index) issues.push(`lineage.attempts[${index}].sequence must be contiguous`)
       if (!['initial', ...TRIGGERS].includes(attempt.trigger as string)) issues.push(`lineage.attempts[${index}].trigger is unsupported`)
-      if (!['planned', 'running', 'completed', 'failed', 'aborted'].includes(attempt.status as string)) issues.push(`lineage.attempts[${index}].status is unsupported`)
+      if (!['planned', 'running', 'completed', 'failed', 'cancelled', 'blocked'].includes(attempt.status as string)) issues.push(`lineage.attempts[${index}].status is unsupported`)
       if (attempt.replanRequestId !== undefined && !fingerprint(attempt.replanRequestId)) issues.push(`lineage.attempts[${index}].replanRequestId must be a SHA-256 fingerprint`)
       if (!fingerprint(attempt.decisionId)) issues.push(`lineage.attempts[${index}].decisionId must be a SHA-256 fingerprint`)
       for (const field of ['planDecisionId', 'proposalFingerprint', 'requirementsId', 'catalogueFingerprint', 'policyFingerprint'] as const)
@@ -418,7 +418,7 @@ export function blockExecutionLineage(lineageValue: unknown, requestValue: unkno
     ...withoutId(previous),
     sequence: lineage.attempts.length,
     trigger: 'outcome-unknown' as const,
-    status: 'aborted' as const,
+    status: 'blocked' as const,
     replanRequestId: request.id,
     parentAttemptId: previous.id,
     ...(request.nodeId ? { nodeId: request.nodeId } : {}),
@@ -434,6 +434,15 @@ export function blockExecutionLineage(lineageValue: unknown, requestValue: unkno
     currentAttemptId: blockedAttempt.id,
     attempts: [...lineage.attempts, blockedAttempt]
   })
+}
+
+/** Closes an active lineage without rewriting its immutable attempt history. */
+export function closeExecutionLineage(lineageValue: unknown, terminalState: 'completed' | 'cancelled', expectedHistoryHead: string): ExecutionLineage {
+  assertExecutionLineage(lineageValue)
+  const lineage = lineageValue
+  if (lineage.terminalState !== 'active') throw new ExecutionReplanContractError(['terminal lineage cannot be closed again'])
+  if (!fingerprint(expectedHistoryHead) || expectedHistoryHead !== lineage.historyHead) throw new ExecutionReplanContractError(['lineage history head changed before close'])
+  return finalize({ ...withoutId(lineage), revision: lineage.revision + 1, terminalState })
 }
 
 /** Plans a fresh immutable attempt while retaining the prior decision as lineage history. */
