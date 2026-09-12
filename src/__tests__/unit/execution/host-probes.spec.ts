@@ -28,7 +28,7 @@ describe('read-only host capability probes (#740)', () => {
     const commands: Partial<Record<HostProbeCommandId, HostProbeResult>> = {
       'darwin-physical-cpu': { state: 'ok', stdout: '8\n' },
       'darwin-cpu-features-arm64': { state: 'ok', stdout: '1\n1\n1\n1\n1\n' },
-      'darwin-displays': { state: 'ok', stdout: JSON.stringify({ SPDisplaysDataType: [{ spdisplays_metal: 'Supported, Metal 4' }] }) }
+      'darwin-displays': { state: 'ok', stdout: JSON.stringify({ SPDisplaysDataType: [{ spdisplays_mtlgpufamilysupport: 'spdisplays_metal4' }] }) }
     }
 
     const snapshot = await collectHostInferenceCapabilities({ system: system({ commands }), workingDirectory: '/safe/project' })

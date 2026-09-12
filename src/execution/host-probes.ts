@@ -224,7 +224,9 @@ function parseDarwinAccelerators(output: string | undefined, hostArchitecture: H
     const devices: HostAcceleratorDevice[] = []
     for (const raw of parsed.SPDisplaysDataType.slice(0, 16)) {
       if (!record(raw)) continue
-      const metal = Object.entries(raw).some(([key, value]) => key.toLowerCase().includes('metal') && typeof value === 'string' && !/unsupported|not supported/i.test(value))
+      const metal = Object.entries(raw).some(
+        ([key, value]) => (key === 'spdisplays_mtlgpufamilysupport' || key.toLowerCase().includes('metal')) && typeof value === 'string' && !/unsupported|not[_\s-]*supported/i.test(value)
+      )
       if (!metal) continue
       const vramText = Object.entries(raw).find(([key, value]) => key.toLowerCase().includes('vram') && typeof value === 'string')?.[1]
       const match = typeof vramText === 'string' ? vramText.match(/([0-9]+(?:\.[0-9]+)?)\s*(GB|MB)/i) : null

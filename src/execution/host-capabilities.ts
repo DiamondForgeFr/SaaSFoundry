@@ -392,9 +392,11 @@ export function deriveHostInferenceViability(observation: HostCapabilityObservat
 
   let tier: HostInferenceViabilityTier = 'unsupported'
   if (constraints.length === 0) {
-    for (const candidate of policy.tiers) {
-      if (tierConstraints(observation, candidate).length === 0) {
+    for (const [index, candidate] of policy.tiers.entries()) {
+      const candidateConstraints = tierConstraints(observation, candidate)
+      if (candidateConstraints.length === 0) {
         tier = candidate.tier
+        if (index > 0) constraints.push(...tierConstraints(observation, policy.tiers[index - 1]))
         break
       }
     }

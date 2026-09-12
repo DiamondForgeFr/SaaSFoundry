@@ -8,6 +8,8 @@ SaaSFoundry keeps coding-agent support and model execution as two separate conce
 
 This separation allows several developers to use different coding agents in the same repository while an execution router compares only the candidates each active host can actually expose.
 
+For local execution, [host capability inspection](./host-capabilities.md) establishes what the current machine can support before runtime and model discovery create candidates.
+
 ## Provider-neutral contract
 
 Every provider/runtime adapter normalizes its records into the same contract:
