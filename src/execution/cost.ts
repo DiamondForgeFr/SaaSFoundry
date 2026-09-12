@@ -1,7 +1,7 @@
 import { stableFingerprint } from './overrides'
+import { ExactRational, exactCostEvidence } from './exact-cost'
 import {
   assertExecutionPlanProposal,
-  type ExactCostEvidence,
   type ExecutionPlanExclusion,
   type ExecutionPlanNode,
   type ExecutionPlanProposal,
@@ -24,58 +24,6 @@ const DIMENSION_UNIT: Record<PriceDimensionKind, PriceUnit> = {
 }
 const INTEGER_DIMENSIONS = new Set<PriceDimensionKind>(['input-token', 'output-token', 'cached-input-token', 'request', 'tool-call'])
 const POLICY_TIE_BREAKERS = new Set(['lower-max-path-cost', 'lower-p95-latency', 'fewer-nodes', 'prefer-local', 'higher-effort'])
-
-class Rational {
-  readonly numerator: bigint
-  readonly denominator: bigint
-
-  constructor(numerator: bigint, denominator = 1n) {
-    if (denominator === 0n) throw new Error('A rational denominator cannot be zero.')
-    const sign = denominator < 0n ? -1n : 1n
-    const divisor = gcd(numerator, denominator)
-    this.numerator = (numerator / divisor) * sign
-    this.denominator = (denominator / divisor) * sign
-  }
-
-  static decimal(value: string): Rational {
-    if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) throw new Error('Expected a non-negative decimal string.')
-    const [whole, fraction = ''] = value.split('.')
-    return new Rational(BigInt(`${whole}${fraction}`), 10n ** BigInt(fraction.length))
-  }
-
-  add(other: Rational): Rational {
-    return new Rational(this.numerator * other.denominator + other.numerator * this.denominator, this.denominator * other.denominator)
-  }
-
-  multiply(other: Rational): Rational {
-    return new Rational(this.numerator * other.numerator, this.denominator * other.denominator)
-  }
-
-  divide(divisor: bigint): Rational {
-    return new Rational(this.numerator, this.denominator * divisor)
-  }
-
-  compare(other: Rational): number {
-    const delta = this.numerator * other.denominator - other.numerator * this.denominator
-    return delta < 0n ? -1 : delta > 0n ? 1 : 0
-  }
-}
-
-function gcd(left: bigint, right: bigint): bigint {
-  let a = left < 0n ? -left : left
-  let b = right < 0n ? -right : right
-  while (b !== 0n) [a, b] = [b, a % b]
-  return a || 1n
-}
-
-function evidence(value: Rational, currency: string, scale: number): ExactCostEvidence {
-  const factor = 10n ** BigInt(scale)
-  const scaled = value.numerator * factor
-  const rounded = (scaled + value.denominator - 1n) / value.denominator
-  const digits = rounded.toString().padStart(scale + 1, '0')
-  const amount = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`
-  return { currency, numerator: value.numerator.toString(), denominator: value.denominator.toString(), amount, scale, rounding: 'ceiling' }
-}
 
 function excluded(proposalId: string, code: ExecutionPlanExclusion['code'], detailCode: string, node?: ExecutionPlanNode): ExecutionPlanExclusion {
   return { proposalId, ...(node ? { nodeId: node.id, candidateId: node.candidateId } : {}), code, detailCode }
@@ -126,7 +74,7 @@ function requirementFingerprintValid(requirements: ExecutionRequirementSet): boo
 
 interface Graph {
   nodes: Map<string, ExecutionPlanNode>
-  edgeProbability: Map<string, Map<string, Rational>>
+  edgeProbability: Map<string, Map<string, ExactRational>>
   order: ExecutionPlanNode[]
 }
 
@@ -135,23 +83,23 @@ function graph(proposal: ExecutionPlanProposal): Graph | string {
   const root = nodes.get(proposal.rootNodeId)!
   if (root.role !== 'primary' || proposal.nodes.filter((node) => node.role === 'primary').length !== 1) return 'single-primary-root'
   const parents = new Map<string, Set<string>>()
-  const edgeProbability = new Map<string, Map<string, Rational>>()
+  const edgeProbability = new Map<string, Map<string, ExactRational>>()
   for (const node of proposal.nodes) {
-    let sum = new Rational(0n)
-    const edges = new Map<string, Rational>()
+    let sum = new ExactRational(0n)
+    const edges = new Map<string, ExactRational>()
     for (const outcome of node.outcomes) {
-      const probability = Rational.decimal(outcome.conditionalProbability)
-      if (probability.numerator <= 0n || probability.compare(new Rational(1n)) > 0) return 'outcome-probability-range'
+      const probability = ExactRational.decimal(outcome.conditionalProbability)
+      if (probability.numerator <= 0n || probability.compare(new ExactRational(1n)) > 0) return 'outcome-probability-range'
       sum = sum.add(probability)
       if (outcome.nextNodeId) {
         if (!nodes.has(outcome.nextNodeId)) return 'dangling-node'
-        edges.set(outcome.nextNodeId, (edges.get(outcome.nextNodeId) ?? new Rational(0n)).add(probability))
+        edges.set(outcome.nextNodeId, (edges.get(outcome.nextNodeId) ?? new ExactRational(0n)).add(probability))
         const nodeParents = parents.get(outcome.nextNodeId) ?? new Set<string>()
         nodeParents.add(node.id)
         parents.set(outcome.nextNodeId, nodeParents)
       }
     }
-    if (sum.compare(new Rational(1n)) !== 0) return 'outcome-probabilities-must-sum-to-one'
+    if (sum.compare(new ExactRational(1n)) !== 0) return 'outcome-probabilities-must-sum-to-one'
     edgeProbability.set(node.id, edges)
   }
   if ((parents.get(proposal.rootNodeId)?.size ?? 0) !== 0) return 'root-has-parent'
@@ -185,7 +133,7 @@ function maximumPathLatency(id: string, graphValue: Graph, memo = new Map<string
   return value
 }
 
-function candidateNodeCost(node: ExecutionPlanNode, candidate: ExecutionCandidate, currency: string): Rational | { code: ExecutionPlanExclusion['code']; detail: string } {
+function candidateNodeCost(node: ExecutionPlanNode, candidate: ExecutionCandidate, currency: string): ExactRational | { code: ExecutionPlanExclusion['code']; detail: string } {
   const rates = new Map<PriceDimensionKind, ExecutionCandidate['pricing']['dimensions'][number]>()
   for (const rate of candidate.pricing.dimensions) {
     if (rates.has(rate.kind)) return { code: 'price-incomplete', detail: 'duplicate-price-dimension' }
@@ -196,16 +144,16 @@ function candidateNodeCost(node: ExecutionPlanNode, candidate: ExecutionCandidat
   const usage = Object.entries(node.estimate.usageP95) as Array<[PriceDimensionKind, string]>
   if (usage.length === 0 || rates.size === 0) return { code: 'price-incomplete', detail: 'explicit-usage-and-prices-required' }
   for (const kind of rates.keys()) if (!Object.prototype.hasOwnProperty.call(node.estimate.usageP95, kind)) return { code: 'price-incomplete', detail: 'usage-missing-for-priced-dimension' }
-  let total = new Rational(0n)
+  let total = new ExactRational(0n)
   for (const [kind, quantityValue] of usage) {
     if (INTEGER_DIMENSIONS.has(kind) && quantityValue.includes('.')) return { code: 'price-incomplete', detail: 'fractional-discrete-usage' }
-    const quantity = Rational.decimal(quantityValue)
+    const quantity = ExactRational.decimal(quantityValue)
     const rate = rates.get(kind)
     if (!rate) {
       if (quantity.numerator > 0n) return { code: 'price-incomplete', detail: 'price-missing-for-positive-usage' }
       continue
     }
-    total = total.add(quantity.multiply(Rational.decimal(rate.amount)).divide(BigInt(rate.per)))
+    total = total.add(quantity.multiply(ExactRational.decimal(rate.amount)).divide(BigInt(rate.per)))
   }
   return total
 }
@@ -306,23 +254,23 @@ export function qualifyAndCostExecutionPlan(
     }
   }
 
-  const nodeCost = new Map<string, Rational>()
+  const nodeCost = new Map<string, ExactRational>()
   for (const node of graphValue.order) {
     const result = candidateNodeCost(node, candidates.get(node.candidateId)!, policy.settlementCurrency)
-    if (!(result instanceof Rational)) return { status: 'excluded', exclusions: [{ ...excluded(proposal.id, result.code, result.detail, node), proposalFingerprint }] }
+    if (!(result instanceof ExactRational)) return { status: 'excluded', exclusions: [{ ...excluded(proposal.id, result.code, result.detail, node), proposalFingerprint }] }
     nodeCost.set(node.id, result)
   }
-  const reach = new Map<string, Rational>([[proposal.rootNodeId, new Rational(1n)]])
+  const reach = new Map<string, ExactRational>([[proposal.rootNodeId, new ExactRational(1n)]])
   for (const node of graphValue.order) {
     const parentReach = reach.get(node.id)!
-    for (const [child, probability] of graphValue.edgeProbability.get(node.id) ?? []) reach.set(child, (reach.get(child) ?? new Rational(0n)).add(parentReach.multiply(probability)))
+    for (const [child, probability] of graphValue.edgeProbability.get(node.id) ?? []) reach.set(child, (reach.get(child) ?? new ExactRational(0n)).add(parentReach.multiply(probability)))
   }
-  let aggregate = new Rational(0n)
+  let aggregate = new ExactRational(0n)
   for (const node of graphValue.order) aggregate = aggregate.add(reach.get(node.id)!.multiply(nodeCost.get(node.id)!))
-  const maximumCost = (id: string, memo = new Map<string, Rational>()): Rational => {
+  const maximumCost = (id: string, memo = new Map<string, ExactRational>()): ExactRational => {
     if (memo.has(id)) return memo.get(id)!
     const children = [...(graphValue.edgeProbability.get(id)?.keys() ?? [])]
-    let tail = new Rational(0n)
+    let tail = new ExactRational(0n)
     for (const child of children) {
       const childCost = maximumCost(child, memo)
       if (childCost.compare(tail) > 0) tail = childCost
@@ -350,12 +298,12 @@ export function qualifyAndCostExecutionPlan(
         nodeId: node.id,
         candidateId: node.candidateId,
         reachProbability: { numerator: reach.get(node.id)!.numerator.toString(), denominator: reach.get(node.id)!.denominator.toString() },
-        invocationP95: evidence(nodeCost.get(node.id)!, policy.settlementCurrency, policy.displayScale),
-        weightedP95: evidence(reach.get(node.id)!.multiply(nodeCost.get(node.id)!), policy.settlementCurrency, policy.displayScale)
+        invocationP95: exactCostEvidence(nodeCost.get(node.id)!, policy.settlementCurrency, policy.displayScale),
+        weightedP95: exactCostEvidence(reach.get(node.id)!.multiply(nodeCost.get(node.id)!), policy.settlementCurrency, policy.displayScale)
       }))
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId)),
-    expectedAggregateP95: evidence(aggregate, policy.settlementCurrency, policy.displayScale),
-    maximumPathP95: evidence(maximum, policy.settlementCurrency, policy.displayScale)
+    expectedAggregateP95: exactCostEvidence(aggregate, policy.settlementCurrency, policy.displayScale),
+    maximumPathP95: exactCostEvidence(maximum, policy.settlementCurrency, policy.displayScale)
   }
   return { status: 'qualified', plan }
 }

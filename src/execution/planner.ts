@@ -1,4 +1,5 @@
 import { qualifyAndCostExecutionPlan } from './cost'
+import { compareExactCosts } from './exact-cost'
 import { stableFingerprint } from './overrides'
 import type { ExecutionPlanDecision, ExecutionPlanExclusion, ExecutionPlanSelectionPolicy, ExecutionPlanTieBreakDecision, ExecutionPlanTieBreaker, QualifiedExecutionPlan } from './plans'
 import type { ExecutionRequirementSet } from './requirements'
@@ -17,11 +18,6 @@ function safeTimestamp(value: unknown, fallback: string): string {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value ? value : fallback
 }
 
-function compareExact(left: { numerator: string; denominator: string }, right: { numerator: string; denominator: string }): number {
-  const delta = BigInt(left.numerator) * BigInt(right.denominator) - BigInt(right.numerator) * BigInt(left.denominator)
-  return delta < 0n ? -1 : delta > 0n ? 1 : 0
-}
-
 function compareNullableNumber(left: number | null, right: number | null): number {
   if (left === right) return 0
   if (left === null) return 1
@@ -32,7 +28,7 @@ function compareNullableNumber(left: number | null, right: number | null): numbe
 function compareRule(left: QualifiedExecutionPlan, right: QualifiedExecutionPlan, rule: ExecutionPlanTieBreaker): number {
   switch (rule) {
     case 'lower-max-path-cost':
-      return compareExact(left.maximumPathP95, right.maximumPathP95)
+      return compareExactCosts(left.maximumPathP95, right.maximumPathP95)
     case 'lower-p95-latency':
       return compareNullableNumber(left.maximumPathLatencyP95Ms, right.maximumPathLatencyP95Ms)
     case 'fewer-nodes':
@@ -45,13 +41,13 @@ function compareRule(left: QualifiedExecutionPlan, right: QualifiedExecutionPlan
 }
 
 function decidingRule(left: QualifiedExecutionPlan, right: QualifiedExecutionPlan, policy: ExecutionPlanSelectionPolicy): ExecutionPlanTieBreakDecision['rule'] {
-  if (compareExact(left.expectedAggregateP95, right.expectedAggregateP95) !== 0) return 'expected-aggregate-p95'
+  if (compareExactCosts(left.expectedAggregateP95, right.expectedAggregateP95) !== 0) return 'expected-aggregate-p95'
   for (const rule of policy.tieBreakers) if (compareRule(left, right, rule) !== 0) return rule
   return 'canonical-proposal-id'
 }
 
 function comparePlan(left: QualifiedExecutionPlan, right: QualifiedExecutionPlan, policy: ExecutionPlanSelectionPolicy): number {
-  const cost = compareExact(left.expectedAggregateP95, right.expectedAggregateP95)
+  const cost = compareExactCosts(left.expectedAggregateP95, right.expectedAggregateP95)
   if (cost !== 0) return cost
   for (const rule of policy.tieBreakers) {
     const result = compareRule(left, right, rule)

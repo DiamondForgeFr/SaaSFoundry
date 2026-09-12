@@ -1,5 +1,7 @@
 import type { ValidationCheck } from './requirements'
 import type { NormalizedEffort, PriceDimensionKind, RuntimeKind } from './types'
+import { assertExactCostEvidence, compareExactCosts, ExactRational } from './exact-cost'
+import { stableFingerprint } from './overrides'
 
 const SAFE_ID = /^[a-z0-9][a-z0-9._:/-]{0,127}$/i
 const SECRET_LIKE = /(?:\bBearer\s+|\b(?:sk|gh[pousr]|github_pat|xox[baprs])[_-]|\beyJ[a-zA-Z0-9_-]{8,}\.)/i
@@ -12,6 +14,74 @@ const ROLES: ExecutionPlanNodeRole[] = ['primary', 'validation', 'retry', 'fallb
 const OUTCOMES: ExecutionOutcomeCode[] = ['success', 'execution-failed', 'validation-failed', 'candidate-unavailable']
 const CHECKS: ValidationCheck[] = ['self-review', 'type-check', 'automated-tests', 'integration-tests', 'independent-review', 'security-tests']
 const PRICE_DIMENSIONS: PriceDimensionKind[] = ['input-token', 'output-token', 'cached-input-token', 'request', 'second', 'minute', 'tool-call']
+const EFFORTS: NormalizedEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'custom']
+const RUNTIMES: RuntimeKind[] = ['cloud', 'local', 'hybrid']
+const BOUNDARIES = ['local-device', 'customer-controlled', 'provider-managed', 'unknown'] as const
+const DECISION_FIELDS = [
+  'schemaVersion',
+  'id',
+  'status',
+  'requirementsId',
+  'catalogueGeneratedAt',
+  'catalogueFingerprint',
+  'planningAt',
+  'policyFingerprint',
+  'selected',
+  'qualified',
+  'exclusions',
+  'tieBreakDecisions'
+] as const
+const QUALIFIED_FIELDS = [
+  'proposalId',
+  'proposalFingerprint',
+  'rootCandidateId',
+  'rootEffort',
+  'rootRuntimeKind',
+  'rootBoundary',
+  'nodeCount',
+  'maximumPathLatencyP95Ms',
+  'approvalRequired',
+  'checks',
+  'evidenceRefs',
+  'nodeCosts',
+  'expectedAggregateP95',
+  'maximumPathP95'
+] as const
+const NODE_COST_FIELDS = ['nodeId', 'candidateId', 'reachProbability', 'invocationP95', 'weightedP95'] as const
+const PROBABILITY_FIELDS = ['numerator', 'denominator'] as const
+const EXCLUSION_FIELDS = ['proposalId', 'proposalFingerprint', 'nodeId', 'candidateId', 'code', 'detailCode'] as const
+const TIE_BREAK_FIELDS = ['winnerProposalId', 'loserProposalId', 'rule'] as const
+const DECISION_STATUSES: ExecutionPlanDecision['status'][] = ['selected', 'unplannable', 'requirements-unsatisfiable']
+const EXCLUSION_CODES: ExecutionPlanExclusionCode[] = [
+  'requirements-unsatisfiable',
+  'invalid-proposal',
+  'candidate-missing',
+  'candidate-stale',
+  'capability-mismatch',
+  'effort-mismatch',
+  'context-mismatch',
+  'privacy-mismatch',
+  'retention-unknown',
+  'retention-mismatch',
+  'tool-mismatch',
+  'validation-mismatch',
+  'independence-mismatch',
+  'latency-unknown',
+  'latency-mismatch',
+  'evidence-stale',
+  'price-incomplete',
+  'currency-uncomparable'
+]
+const TIE_BREAK_RULES: ExecutionPlanTieBreakDecision['rule'][] = [
+  'expected-aggregate-p95',
+  'lower-max-path-cost',
+  'lower-p95-latency',
+  'fewer-nodes',
+  'prefer-local',
+  'higher-effort',
+  'canonical-proposal-id'
+]
+const FINGERPRINT = /^[a-f0-9]{64}$/
 
 export type ExecutionPlanNodeRole = 'primary' | 'validation' | 'retry' | 'fallback'
 export type ExecutionOutcomeCode = 'success' | 'execution-failed' | 'validation-failed' | 'candidate-unavailable'
@@ -165,7 +235,7 @@ export class ExecutionPlanContractError extends Error {
   readonly issues: string[]
 
   constructor(issues: string[]) {
-    super(`Invalid execution plan proposal: ${issues.join('; ')}`)
+    super(`Invalid execution plan contract: ${issues.join('; ')}`)
     this.name = 'ExecutionPlanContractError'
     this.issues = [...issues]
   }
@@ -260,6 +330,146 @@ export function assertExecutionPlanProposal(value: unknown): asserts value is Ex
         })
     })
     if (safeId(value.rootNodeId) && !nodeIds.has(value.rootNodeId)) issues.push('rootNodeId must reference a declared node')
+  }
+  if (issues.length) throw new ExecutionPlanContractError(issues)
+}
+
+function validateExact(value: unknown, label: string, issues: string[]): void {
+  try {
+    assertExactCostEvidence(value, label)
+  } catch (error) {
+    issues.push(error instanceof Error ? error.message : `${label} is invalid`)
+  }
+}
+
+function validateQualifiedPlan(value: unknown, label: string, issues: string[]): value is QualifiedExecutionPlan {
+  if (!object(value)) {
+    issues.push(`${label} must be an object`)
+    return false
+  }
+  rejectUnknown(value, QUALIFIED_FIELDS, label, issues)
+  if (!safeId(value.proposalId)) issues.push(`${label}.proposalId must be a safe public identifier`)
+  if (typeof value.proposalFingerprint !== 'string' || !FINGERPRINT.test(value.proposalFingerprint)) issues.push(`${label}.proposalFingerprint must be a SHA-256 fingerprint`)
+  if (!safeId(value.rootCandidateId)) issues.push(`${label}.rootCandidateId must be a safe public identifier`)
+  if (!EFFORTS.includes(value.rootEffort as NormalizedEffort)) issues.push(`${label}.rootEffort is unsupported`)
+  if (!RUNTIMES.includes(value.rootRuntimeKind as RuntimeKind)) issues.push(`${label}.rootRuntimeKind is unsupported`)
+  if (!BOUNDARIES.includes(value.rootBoundary as (typeof BOUNDARIES)[number])) issues.push(`${label}.rootBoundary is unsupported`)
+  if (!Number.isSafeInteger(value.nodeCount) || Number(value.nodeCount) < 1) issues.push(`${label}.nodeCount must be a positive safe integer`)
+  if (value.maximumPathLatencyP95Ms !== null && (!Number.isSafeInteger(value.maximumPathLatencyP95Ms) || Number(value.maximumPathLatencyP95Ms) < 0))
+    issues.push(`${label}.maximumPathLatencyP95Ms must be a non-negative safe integer or null`)
+  if (typeof value.approvalRequired !== 'boolean') issues.push(`${label}.approvalRequired must be a boolean`)
+  validateUniqueIds(value.checks, CHECKS, `${label}.checks`, issues)
+  validateUniqueIds(value.evidenceRefs, null, `${label}.evidenceRefs`, issues)
+  if (!Array.isArray(value.nodeCosts) || value.nodeCosts.length === 0) issues.push(`${label}.nodeCosts must be a non-empty array`)
+  else {
+    const nodeIds = new Set<string>()
+    value.nodeCosts.forEach((rawCost, index) => {
+      const costLabel = `${label}.nodeCosts[${index}]`
+      if (!object(rawCost)) {
+        issues.push(`${costLabel} must be an object`)
+        return
+      }
+      rejectUnknown(rawCost, NODE_COST_FIELDS, costLabel, issues)
+      if (!safeId(rawCost.nodeId)) issues.push(`${costLabel}.nodeId must be a safe public identifier`)
+      else if (nodeIds.has(rawCost.nodeId)) issues.push(`${costLabel}.nodeId must be unique`)
+      else nodeIds.add(rawCost.nodeId)
+      if (!safeId(rawCost.candidateId)) issues.push(`${costLabel}.candidateId must be a safe public identifier`)
+      if (!object(rawCost.reachProbability)) issues.push(`${costLabel}.reachProbability must be an object`)
+      else {
+        rejectUnknown(rawCost.reachProbability, PROBABILITY_FIELDS, `${costLabel}.reachProbability`, issues)
+        try {
+          if (typeof rawCost.reachProbability.numerator !== 'string' || typeof rawCost.reachProbability.denominator !== 'string') throw new Error()
+          const probability = ExactRational.evidence({ numerator: rawCost.reachProbability.numerator, denominator: rawCost.reachProbability.denominator })
+          if (probability.compare(new ExactRational(1n)) > 0) issues.push(`${costLabel}.reachProbability must not exceed one`)
+        } catch {
+          issues.push(`${costLabel}.reachProbability must be a reduced non-negative rational`)
+        }
+      }
+      validateExact(rawCost.invocationP95, `${costLabel}.invocationP95`, issues)
+      validateExact(rawCost.weightedP95, `${costLabel}.weightedP95`, issues)
+    })
+    if (Number.isSafeInteger(value.nodeCount) && value.nodeCosts.length !== value.nodeCount) issues.push(`${label}.nodeCount must match nodeCosts length`)
+  }
+  validateExact(value.expectedAggregateP95, `${label}.expectedAggregateP95`, issues)
+  validateExact(value.maximumPathP95, `${label}.maximumPathP95`, issues)
+  try {
+    if (compareExactCosts(value.expectedAggregateP95 as ExactCostEvidence, value.maximumPathP95 as ExactCostEvidence) > 0) issues.push(`${label}.maximumPathP95 must cover expectedAggregateP95`)
+  } catch {
+    // Individual evidence validation reports the actionable issue.
+  }
+  return true
+}
+
+/** Validates an immutable planner ledger after a JSON or process boundary. */
+export function assertExecutionPlanDecision(value: unknown): asserts value is ExecutionPlanDecision {
+  const issues: string[] = []
+  if (!object(value)) throw new ExecutionPlanContractError(['decision must be an object'])
+  rejectUnknown(value, DECISION_FIELDS, 'decision', issues)
+  if (value.schemaVersion !== 1) issues.push('decision.schemaVersion must equal 1')
+  if (typeof value.id !== 'string' || !FINGERPRINT.test(value.id)) issues.push('decision.id must be a SHA-256 fingerprint')
+  if (!DECISION_STATUSES.includes(value.status as ExecutionPlanDecision['status'])) issues.push('decision.status is unsupported')
+  if (!safeId(value.requirementsId)) issues.push('decision.requirementsId must be a safe public identifier')
+  if (typeof value.catalogueFingerprint !== 'string' || !FINGERPRINT.test(value.catalogueFingerprint)) issues.push('decision.catalogueFingerprint must be a SHA-256 fingerprint')
+  if (typeof value.policyFingerprint !== 'string' || !FINGERPRINT.test(value.policyFingerprint)) issues.push('decision.policyFingerprint must be a SHA-256 fingerprint')
+  const selectedStatus = value.status === 'selected'
+  if (selectedStatus) {
+    if (!timestamp(value.catalogueGeneratedAt)) issues.push('decision.catalogueGeneratedAt must be a canonical UTC timestamp')
+    if (!timestamp(value.planningAt)) issues.push('decision.planningAt must be a canonical UTC timestamp')
+    if (timestamp(value.catalogueGeneratedAt) && timestamp(value.planningAt) && value.catalogueGeneratedAt > value.planningAt)
+      issues.push('decision.catalogueGeneratedAt must not be later than planningAt')
+  } else {
+    if (!safeId(value.catalogueGeneratedAt)) issues.push('decision.catalogueGeneratedAt must be a safe timestamp or failure identifier')
+    if (!safeId(value.planningAt)) issues.push('decision.planningAt must be a safe timestamp or failure identifier')
+  }
+  let selectedValid = false
+  if (value.selected !== undefined) selectedValid = validateQualifiedPlan(value.selected, 'decision.selected', issues)
+  if (selectedStatus !== (value.selected !== undefined)) issues.push('decision.selected must exist exactly when status is selected')
+  if (!Array.isArray(value.qualified)) issues.push('decision.qualified must be an array')
+  else {
+    value.qualified.forEach((plan, index) => validateQualifiedPlan(plan, `decision.qualified[${index}]`, issues))
+    const proposalIds = value.qualified
+      .filter(object)
+      .map((plan) => plan.proposalId)
+      .filter((id): id is string => typeof id === 'string')
+    if (new Set(proposalIds).size !== proposalIds.length) issues.push('decision.qualified proposal IDs must be unique')
+    if (!selectedStatus && value.qualified.length !== 0) issues.push('decision.qualified must be empty without a selected plan')
+    if (selectedStatus && (value.qualified.length === 0 || !selectedValid || stableFingerprint(value.selected) !== stableFingerprint(value.qualified[0])))
+      issues.push('decision.selected must equal the first qualified plan')
+  }
+  if (!Array.isArray(value.exclusions)) issues.push('decision.exclusions must be an array')
+  else
+    value.exclusions.forEach((rawExclusion, index) => {
+      const label = `decision.exclusions[${index}]`
+      if (!object(rawExclusion)) {
+        issues.push(`${label} must be an object`)
+        return
+      }
+      rejectUnknown(rawExclusion, EXCLUSION_FIELDS, label, issues)
+      if (!safeId(rawExclusion.proposalId)) issues.push(`${label}.proposalId must be a safe public identifier`)
+      if (rawExclusion.proposalFingerprint !== undefined && (typeof rawExclusion.proposalFingerprint !== 'string' || !FINGERPRINT.test(rawExclusion.proposalFingerprint)))
+        issues.push(`${label}.proposalFingerprint must be a SHA-256 fingerprint`)
+      if (rawExclusion.nodeId !== undefined && !safeId(rawExclusion.nodeId)) issues.push(`${label}.nodeId must be a safe public identifier`)
+      if (rawExclusion.candidateId !== undefined && !safeId(rawExclusion.candidateId)) issues.push(`${label}.candidateId must be a safe public identifier`)
+      if (!EXCLUSION_CODES.includes(rawExclusion.code as ExecutionPlanExclusionCode)) issues.push(`${label}.code is unsupported`)
+      if (rawExclusion.detailCode !== undefined && !safeId(rawExclusion.detailCode)) issues.push(`${label}.detailCode must be a safe public identifier`)
+    })
+  if (!Array.isArray(value.tieBreakDecisions)) issues.push('decision.tieBreakDecisions must be an array')
+  else
+    value.tieBreakDecisions.forEach((rawTieBreak, index) => {
+      const label = `decision.tieBreakDecisions[${index}]`
+      if (!object(rawTieBreak)) {
+        issues.push(`${label} must be an object`)
+        return
+      }
+      rejectUnknown(rawTieBreak, TIE_BREAK_FIELDS, label, issues)
+      if (!safeId(rawTieBreak.winnerProposalId)) issues.push(`${label}.winnerProposalId must be a safe public identifier`)
+      if (!safeId(rawTieBreak.loserProposalId)) issues.push(`${label}.loserProposalId must be a safe public identifier`)
+      if (!TIE_BREAK_RULES.includes(rawTieBreak.rule as ExecutionPlanTieBreakDecision['rule'])) issues.push(`${label}.rule is unsupported`)
+    })
+  if (typeof value.id === 'string' && FINGERPRINT.test(value.id)) {
+    const payload = { ...value }
+    delete payload.id
+    if (value.id !== stableFingerprint(payload)) issues.push('decision.id does not match its canonical payload')
   }
   if (issues.length) throw new ExecutionPlanContractError(issues)
 }
