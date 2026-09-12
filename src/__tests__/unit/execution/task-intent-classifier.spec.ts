@@ -104,6 +104,7 @@ describe('task intent classification (#721)', () => {
     expect(() => classifyTaskIntent(unsafeTool)).toThrow('safe public identifiers')
     expect(() => classifyTaskIntent(duplicateCapabilities)).toThrow('duplicates')
     expect(() => classifyTaskIntent({ text: 'Do work' }, { policyRevision: 'sk-secret' })).toThrow('safe public identifier')
+    expect(() => classifyTaskIntent({ text: 'Do work' }, { policyRevision: 123 as unknown as string })).toThrow('safe public identifier')
   })
 
   it('keeps classification independent from candidate catalogues and ranking', () => {
