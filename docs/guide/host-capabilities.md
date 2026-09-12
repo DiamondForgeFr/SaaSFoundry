@@ -29,8 +29,8 @@ The default versioned policy classifies a host as `unsupported`, `background-onl
 tier when every required fact meets its threshold. The decision records why the host did not reach the next tier. Unknown operating-system, architecture, capacity, or required accelerator evidence
 prevents promotion.
 
-The tier describes machine viability only. Every decision therefore retains `model-fit-not-established` and `runtime-availability-not-established`. Runtime discovery, model compatibility, context
-limits, and task requirements belong to later adapters and the execution-candidate catalogue.
+The tier describes machine viability only. Every decision therefore retains `model-fit-not-established` and `runtime-availability-not-established`.
+[Local execution profiles](./local-execution-profiles.md) combine this snapshot with runtime and model-adapter evidence before any installation is proposed.
 
 The default thresholds are conservative policy inputs rather than claims about a particular model:
 
