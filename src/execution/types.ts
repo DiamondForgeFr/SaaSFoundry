@@ -53,7 +53,8 @@ export interface ExecutionCandidate extends ExecutionCandidateIdentity {
     boundary: PrivacyBoundary
     dataResidency?: string[]
     trainingUse: TrainingUse
-    retention?: string
+    /** Normalized retention duration; `null` means the adapter cannot establish it. */
+    retentionDays: number | null
   }
   tools: {
     mode: ToolBehaviorMode

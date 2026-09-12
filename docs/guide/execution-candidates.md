@@ -18,7 +18,7 @@ Every provider/runtime adapter normalizes its records into the same contract:
 | Capacity     | Context and output limits plus provider-neutral capability identifiers                                                  |
 | Availability | State, observation time, expiry, and a machine-readable reason when unavailable                                         |
 | Price        | Timestamped dimensions expressed as decimal amounts, currency, normalized unit, denominator, and original provider unit |
-| Privacy      | Execution boundary, residency where known, training-use policy, and retention where known                               |
+| Privacy      | Execution boundary, residency where known, training-use policy, and normalized retention days or explicit unknown       |
 | Tools        | Invocation mode, supported tools, parallel-call support, and approval behavior                                          |
 | Provenance   | Adapter, provider record reference, and retrieval time                                                                  |
 
