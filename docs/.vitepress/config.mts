@@ -105,6 +105,7 @@ export default defineConfig({
             { text: 'Monorepo vs Multirepo', link: '/guide/monorepo-vs-multirepo' },
             { text: 'Agent Coexistence', link: '/guide/agent-coexistence' },
             { text: 'Execution Candidates', link: '/guide/execution-candidates' },
+            { text: 'Execution Requirements', link: '/guide/execution-requirements' },
             { text: 'Workflow System', link: '/guide/workflow-system' },
             { text: 'Skills System', link: '/guide/skills-system' },
             { text: 'Module System', link: '/guide/module-system' },

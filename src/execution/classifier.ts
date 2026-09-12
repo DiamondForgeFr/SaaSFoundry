@@ -27,6 +27,25 @@ const LATENCY_ORDER: LatencyPriority[] = ['interactive', 'balanced', 'throughput
 const CONTEXT_ORDER: ContextMode[] = ['partitionable', 'single-candidate']
 const ALL_BOUNDARIES: PrivacyBoundary[] = ['customer-controlled', 'local-device', 'provider-managed', 'unknown']
 const ALL_TRAINING: TrainingUse[] = ['none', 'opt-in', 'opt-out', 'unknown']
+const TASK_CATEGORIES: TaskCategory[] = ['mechanical', 'implementation', 'architecture', 'security', 'data-sensitive']
+const TASK_OPERATIONS: TaskOperation[] = ['read', 'document', 'rename', 'edit', 'generate', 'refactor', 'migrate', 'deploy', 'architecture', 'security-review']
+const DATA_SENSITIVITIES = ['public', 'internal', 'confidential', 'restricted'] as const
+const EXECUTION_CAPABILITIES: ExecutionCapability[] = ['text', 'code', 'repository-analysis', 'system-design', 'security-analysis', 'tool-use', 'long-context']
+const INTENT_FIELDS = ['text', 'categories', 'signals'] as const
+const SIGNAL_FIELDS = [
+  'operation',
+  'productionImpact',
+  'handlesSecrets',
+  'destructive',
+  'dataMigration',
+  'estimatedInputTokens',
+  'estimatedOutputTokens',
+  'requiredCapabilities',
+  'requiredTools',
+  'dataSensitivity'
+] as const
+const SAFE_PUBLIC_ID = /^[a-z0-9][a-z0-9._:/-]{0,127}$/i
+const SECRET_LIKE = /(?:\bBearer\s+|\b(?:sk|gh[pousr]|github_pat|xox[baprs])[_-]|\beyJ[a-zA-Z0-9_-]{8,}\.)/i
 
 interface CategoryProfile {
   risk: TaskRiskLevel
@@ -108,7 +127,7 @@ const KEYWORDS: Record<TaskCategory, RegExp> = {
   mechanical: /\b(?:docs?|documentation|rename|typo|format|spelling|copy|orthographe|renommer|mise en forme)\b/i,
   implementation: /\b(?:implement|add|create|fix|change|code|feature|endpoint|module|impl[eé]ment|ajout|ajouter|cr[eé]er|corriger|modifier|fonctionnalit[eé])\b/i,
   architecture: /\b(?:architecture|architectural|design|refactor|restructure|migration|schema|conception|refonte|restructur(?:e|er|ation))\b/i,
-  security: /\b(?:security|auth|credential|secret|token|encrypt|permission|rbac|vulnerabilit(?:y|ies)|s[eé]curit[eé]|authentification|identifiants?|chiffrement)\b/i,
+  security: /\b(?:security|auth|authentication|credential|secret|token|encrypt|permission|rbac|vulnerabilit(?:y|ies)|s[eé]curit[eé]|authentification|identifiants?|chiffrement)\b/i,
   'data-sensitive': /\b(?:personal data|pii|health|payment|financial|confidential|customer data|donn[eé]es personnelles|sant[eé]|paiement|confidentiel)\b/i
 }
 
@@ -142,8 +161,50 @@ function normalizeText(value: string): string {
   return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
-function validateIntent(intent: TaskIntent): void {
+function assertPlainObject(value: unknown, label: string): asserts value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object.`)
+}
+
+function assertClosedObject(value: Record<string, unknown>, fields: readonly string[], label: string): void {
+  const unknown = Object.keys(value).filter((field) => !fields.includes(field))
+  if (unknown.length) throw new Error(`${label} contains unsupported fields: ${unknown.sort().join(', ')}.`)
+}
+
+function assertEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): asserts value is T {
+  if (typeof value !== 'string' || !allowed.includes(value as T)) throw new Error(`${label} has an unsupported value.`)
+}
+
+function assertUniqueEnumArray<T extends string>(value: unknown, allowed: readonly T[], label: string): asserts value is T[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array.`)
+  for (const entry of value) assertEnum(entry, allowed, label)
+  if (new Set(value).size !== value.length) throw new Error(`${label} must not contain duplicates.`)
+}
+
+function assertSafeIdentifiers(value: unknown, label: string): asserts value is string[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array.`)
+  for (const entry of value) {
+    if (typeof entry !== 'string' || !SAFE_PUBLIC_ID.test(entry) || SECRET_LIKE.test(entry)) throw new Error(`${label} must contain only safe public identifiers.`)
+  }
+  if (new Set(value).size !== value.length) throw new Error(`${label} must not contain duplicates.`)
+}
+
+function validateIntent(intent: TaskIntent, policyRevision: string): void {
+  assertPlainObject(intent, 'Task intent')
+  assertClosedObject(intent, INTENT_FIELDS, 'Task intent')
   if (typeof intent.text !== 'string' || !intent.text.trim()) throw new Error('Task intent text must be a non-empty string.')
+  if (!SAFE_PUBLIC_ID.test(policyRevision) || SECRET_LIKE.test(policyRevision)) throw new Error('Execution requirement policy revision must be a safe public identifier.')
+  if (intent.categories !== undefined) assertUniqueEnumArray(intent.categories, TASK_CATEGORIES, 'Task intent categories')
+  if (intent.signals !== undefined) {
+    assertPlainObject(intent.signals, 'Task intent signals')
+    assertClosedObject(intent.signals, SIGNAL_FIELDS, 'Task intent signals')
+    if (intent.signals.operation !== undefined) assertEnum(intent.signals.operation, TASK_OPERATIONS, 'Task intent operation')
+    if (intent.signals.dataSensitivity !== undefined) assertEnum(intent.signals.dataSensitivity, DATA_SENSITIVITIES, 'Task intent data sensitivity')
+    for (const field of ['productionImpact', 'handlesSecrets', 'destructive', 'dataMigration'] as const) {
+      if (intent.signals[field] !== undefined && typeof intent.signals[field] !== 'boolean') throw new Error(`Task intent signal '${field}' must be a boolean.`)
+    }
+    if (intent.signals.requiredCapabilities !== undefined) assertUniqueEnumArray(intent.signals.requiredCapabilities, EXECUTION_CAPABILITIES, 'Task intent required capabilities')
+    if (intent.signals.requiredTools !== undefined) assertSafeIdentifiers(intent.signals.requiredTools, 'Task intent required tools')
+  }
   for (const value of [intent.signals?.estimatedInputTokens, intent.signals?.estimatedOutputTokens]) {
     if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) throw new Error('Task intent token estimates must be positive safe integers.')
   }
@@ -279,11 +340,17 @@ function baseline(intent: TaskIntent, policyRevision: string): ExecutionRequirem
 }
 
 export function classifyTaskIntent(intent: TaskIntent, options: ClassifyTaskIntentOptions = {}): ExecutionRequirementSet {
-  validateIntent(intent)
+  const rawOptions: unknown = options
+  assertPlainObject(rawOptions, 'Task intent classification options')
+  assertClosedObject(rawOptions, ['policyRevision', 'workflowConstraints', 'userConstraints'], 'Task intent classification options')
+  const policyRevision = options.policyRevision ?? EXECUTION_REQUIREMENT_POLICY_REVISION
+  validateIntent(intent, policyRevision)
   const workflow = options.workflowConstraints ?? []
   const user = options.userConstraints ?? []
+  if (!Array.isArray(workflow)) throw new Error('workflowConstraints must be an array.')
+  if (!Array.isArray(user)) throw new Error('userConstraints must be an array.')
   if (workflow.some((constraint) => constraint.source !== 'workflow')) throw new Error('workflowConstraints may contain only workflow overrides.')
   if (user.some((constraint) => constraint.source !== 'user')) throw new Error('userConstraints may contain only user overrides.')
-  const requirement = baseline(intent, options.policyRevision ?? EXECUTION_REQUIREMENT_POLICY_REVISION)
+  const requirement = baseline(intent, policyRevision)
   return applyExecutionRequirementOverrides(requirement, [...workflow, ...user])
 }
