@@ -7,6 +7,7 @@ import type { ExecutionCandidateCatalogueSnapshot, NormalizedEffort } from './ty
 
 const EFFORT_ORDER: NormalizedEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'custom']
 const SECRET_LIKE = /(?:\bBearer\s+|\b(?:sk|gh[pousr]|github_pat|xox[baprs])[_-]|\beyJ[a-zA-Z0-9_-]{8,}\.)/i
+const MAX_EXECUTION_PLAN_PROPOSALS = 256
 
 function safeProposalId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-z0-9][a-z0-9._:/-]{0,127}$/i.test(value) && !SECRET_LIKE.test(value)
@@ -102,6 +103,7 @@ export function selectMinimumCostExecutionPlan(
   catalogue: ExecutionCandidateCatalogueSnapshot,
   policy: ExecutionPlanSelectionPolicy
 ): ExecutionPlanDecision {
+  if (!Array.isArray(proposals) || proposals.length > MAX_EXECUTION_PLAN_PROPOSALS) throw new Error(`Execution planning accepts at most ${MAX_EXECUTION_PLAN_PROPOSALS} proposals.`)
   const qualified: QualifiedExecutionPlan[] = []
   const exclusions: ExecutionPlanExclusion[] = []
   const proposalIds = proposals.map((proposal) => (proposal !== null && typeof proposal === 'object' ? (proposal as { id?: unknown }).id : undefined))

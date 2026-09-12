@@ -5,10 +5,12 @@ import {
   ExecutionCandidateCatalogue,
   selectMinimumCostExecutionPlan,
   type ExecutionBudgetJustification,
+  type ExecutionBudgetHostAuthority,
   type ExecutionCandidate,
   type ExecutionCandidateAdapter,
   type ExecutionPlanProposal,
   type ExecutionPlanSelectionPolicy,
+  type ExecutionRequirementSet,
   type SessionWorkloadEvidence
 } from '../../../execution'
 
@@ -99,6 +101,15 @@ const justification: ExecutionBudgetJustification = {
   evidenceRefs: ['quality/benchmark-1']
 }
 
+function host(requirements: ExecutionRequirementSet, proposals: readonly unknown[]): ExecutionBudgetHostAuthority {
+  return {
+    requirements,
+    proposals,
+    verifySessionEvidence: () => true,
+    consumeApprovalGrant: () => true
+  }
+}
+
 describe('public execution budget integration (#729)', () => {
   it('flows from adapter discovery through requirements and planning to exact session authority', async () => {
     const current = candidate('current', '1.001', 'high')
@@ -107,8 +118,9 @@ describe('public execution budget integration (#729)', () => {
     const catalogue = await new ExecutionCandidateCatalogue({ clock: () => new Date(PLANNING_AT) }).register(adapter([roundedSameButHigher, current, equal])).snapshot()
     const requirements = classifyTaskIntent({ text: 'Document a public value', categories: ['mechanical'], signals: { operation: 'document' } })
 
-    const equalPlan = selectMinimumCostExecutionPlan([proposal('plan/equal', equal)], requirements, catalogue, policy)
-    const equalDecision = authorizeExecutionPlan(equalPlan, session(current), catalogue, policy, { evaluatedAt: EVALUATED_AT })
+    const equalProposals = [proposal('plan/equal', equal)]
+    const equalPlan = selectMinimumCostExecutionPlan(equalProposals, requirements, catalogue, policy)
+    const equalDecision = authorizeExecutionPlan(equalPlan, session(current), catalogue, policy, { evaluatedAt: EVALUATED_AT }, host(requirements, equalProposals))
     expect(equalDecision).toMatchObject({
       status: 'authorized',
       mode: 'automatic',
@@ -116,8 +128,9 @@ describe('public execution budget integration (#729)', () => {
       expectedAggregateP95: { numerator: '1001', denominator: '1000', amount: '1.01' }
     })
 
-    const higherPlan = selectMinimumCostExecutionPlan([proposal('plan/rounded-higher', roundedSameButHigher)], requirements, catalogue, policy)
-    const higherDecision = authorizeExecutionPlan(higherPlan, session(current), catalogue, policy, { evaluatedAt: EVALUATED_AT, justification })
+    const higherProposals = [proposal('plan/rounded-higher', roundedSameButHigher)]
+    const higherPlan = selectMinimumCostExecutionPlan(higherProposals, requirements, catalogue, policy)
+    const higherDecision = authorizeExecutionPlan(higherPlan, session(current), catalogue, policy, { evaluatedAt: EVALUATED_AT, justification }, host(requirements, higherProposals))
     expect(higherDecision).toMatchObject({
       status: 'approval-required',
       baselineP95: { amount: '1.01' },
@@ -137,10 +150,12 @@ describe('public execution budget integration (#729)', () => {
     const rightCatalogue = await new ExecutionCandidateCatalogue({ clock: () => new Date(PLANNING_AT) }).register(adapter([first, current, second])).snapshot()
     const requirements = classifyTaskIntent({ text: 'Private raw prompt with sk-12345678901234567890', categories: ['mechanical'], signals: { operation: 'document' } })
 
-    const left = selectMinimumCostExecutionPlan([proposal('plan/b', second), proposal('plan/a', first)], requirements, leftCatalogue, policy)
-    const right = selectMinimumCostExecutionPlan([proposal('plan/a', first), proposal('plan/b', second)], requirements, rightCatalogue, policy)
-    const leftDecision = authorizeExecutionPlan(left, session(current), leftCatalogue, policy, { evaluatedAt: EVALUATED_AT })
-    const rightDecision = authorizeExecutionPlan(right, session(current), rightCatalogue, policy, { evaluatedAt: EVALUATED_AT })
+    const leftProposals = [proposal('plan/b', second), proposal('plan/a', first)]
+    const rightProposals = [proposal('plan/a', first), proposal('plan/b', second)]
+    const left = selectMinimumCostExecutionPlan(leftProposals, requirements, leftCatalogue, policy)
+    const right = selectMinimumCostExecutionPlan(rightProposals, requirements, rightCatalogue, policy)
+    const leftDecision = authorizeExecutionPlan(left, session(current), leftCatalogue, policy, { evaluatedAt: EVALUATED_AT }, host(requirements, leftProposals))
+    const rightDecision = authorizeExecutionPlan(right, session(current), rightCatalogue, policy, { evaluatedAt: EVALUATED_AT }, host(requirements, rightProposals))
 
     expect(left.id).toBe(right.id)
     expect(leftDecision.id).toBe(rightDecision.id)
@@ -156,9 +171,10 @@ describe('public execution budget integration (#729)', () => {
       categories: ['security'],
       signals: { operation: 'security-review', requiredCapabilities: ['security-analysis'] }
     })
-    const plan = selectMinimumCostExecutionPlan([proposal('plan/insufficient', current)], requirements, catalogue, policy)
+    const proposals = [proposal('plan/insufficient', current)]
+    const plan = selectMinimumCostExecutionPlan(proposals, requirements, catalogue, policy)
 
-    expect(authorizeExecutionPlan(plan, session(current), catalogue, policy, { evaluatedAt: EVALUATED_AT })).toMatchObject({
+    expect(authorizeExecutionPlan(plan, session(current), catalogue, policy, { evaluatedAt: EVALUATED_AT }, host(requirements, proposals))).toMatchObject({
       status: 'rejected',
       mode: null,
       reasonCode: 'no-qualified-plan'

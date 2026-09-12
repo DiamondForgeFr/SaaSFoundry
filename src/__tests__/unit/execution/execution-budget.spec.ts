@@ -3,8 +3,10 @@ import {
   classifyTaskIntent,
   createExecutionCandidateId,
   selectMinimumCostExecutionPlan,
+  stableFingerprint,
   type ExecutionCandidate,
   type ExecutionCandidateCatalogueSnapshot,
+  type ExecutionBudgetHostAuthority,
   type ExecutionPlanNode,
   type ExecutionPlanProposal,
   type ExecutionPlanSelectionPolicy
@@ -91,6 +93,19 @@ const justification: ExecutionBudgetJustification = {
   evidenceRefs: ['benchmarks/recovery-benefit']
 }
 
+function host(proposals: readonly unknown[], consumed = new Set<string>()): ExecutionBudgetHostAuthority {
+  return {
+    requirements,
+    proposals,
+    verifySessionEvidence: () => true,
+    consumeApprovalGrant: (grant) => {
+      if (consumed.has(grant.id)) return false
+      consumed.add(grant.id)
+      return true
+    }
+  }
+}
+
 function session(entry: ExecutionCandidate): SessionWorkloadEvidence {
   return {
     schemaVersion: 1,
@@ -128,8 +143,9 @@ describe('session-derived execution budget authority (#728)', () => {
     const current = candidate('session', '10')
     const delegated = candidate('delegated-higher-effort-value', '5')
     const snapshot = catalogue([current, delegated])
-    const plan = selectMinimumCostExecutionPlan([proposal(delegated)], requirements, snapshot, policy)
-    const result = authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: EVALUATED_AT })
+    const proposals = [proposal(delegated)]
+    const plan = selectMinimumCostExecutionPlan(proposals, requirements, snapshot, policy)
+    const result = authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: EVALUATED_AT }, host(proposals))
 
     expect(result).toMatchObject({ status: 'authorized', mode: 'automatic', reasonCode: 'within-session-authority', expectedAggregateP95: { amount: '5.00' }, maximumPathP95: { amount: '5.00' } })
     expect(Object.isFrozen(result)).toBe(true)
@@ -140,8 +156,9 @@ describe('session-derived execution budget authority (#728)', () => {
     const primary = candidate('primary', '5')
     const fallback = candidate('fallback', '10')
     const snapshot = catalogue([current, primary, fallback])
-    const plan = selectMinimumCostExecutionPlan([proposal(primary, fallback)], requirements, snapshot, policy)
-    const result = authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: EVALUATED_AT, justification })
+    const proposals = [proposal(primary, fallback)]
+    const plan = selectMinimumCostExecutionPlan(proposals, requirements, snapshot, policy)
+    const result = authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: EVALUATED_AT, justification }, host(proposals))
 
     expect(result).toMatchObject({
       status: 'approval-required',
@@ -156,8 +173,11 @@ describe('session-derived execution budget authority (#728)', () => {
     const current = candidate('session', '10')
     const delegated = candidate('expensive', '12')
     const snapshot = catalogue([current, delegated])
-    const plan = selectMinimumCostExecutionPlan([proposal(delegated)], requirements, snapshot, policy)
-    const request = authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: EVALUATED_AT, justification })
+    const proposals = [proposal(delegated)]
+    const plan = selectMinimumCostExecutionPlan(proposals, requirements, snapshot, policy)
+    const consumed = new Set<string>()
+    const authority = host(proposals, consumed)
+    const request = authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: EVALUATED_AT, justification }, authority)
     expect(request.status).toBe('approval-required')
     const challenge = request.challenge!
     const grant: ExecutionBudgetApprovalGrant = {
@@ -173,15 +193,21 @@ describe('session-derived execution budget authority (#728)', () => {
       approvedByRef: 'user/owner'
     }
 
-    expect(authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: APPROVED_EVALUATED_AT, justification, approval: grant })).toMatchObject({
+    expect(authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: APPROVED_EVALUATED_AT, justification, approval: grant }, authority)).toMatchObject({
       status: 'authorized',
       mode: 'approved-increment',
       reasonCode: 'approval-granted',
       approvalEventId: 'approval/event-1'
     })
 
+    expect(authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: APPROVED_EVALUATED_AT, justification, approval: grant }, authority)).toMatchObject({
+      status: 'rejected',
+      reasonCode: 'approval-host-rejected',
+      dispatchAuthorized: false
+    })
+
     grant.pathIncrement = { ...grant.pathIncrement, numerator: '3', amount: '3.00' }
-    expect(authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: APPROVED_EVALUATED_AT, justification, approval: grant })).toMatchObject({
+    expect(authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: APPROVED_EVALUATED_AT, justification, approval: grant }, authority)).toMatchObject({
       status: 'rejected',
       reasonCode: 'approval-scope-mismatch'
     })
@@ -191,11 +217,42 @@ describe('session-derived execution budget authority (#728)', () => {
     const current = candidate('session', '10')
     const delegated = candidate('side-effecting', '5', true)
     const snapshot = catalogue([current, delegated])
-    const plan = selectMinimumCostExecutionPlan([proposal(delegated)], requirements, snapshot, policy)
-    expect(authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: EVALUATED_AT })).toMatchObject({
+    const proposals = [proposal(delegated)]
+    const plan = selectMinimumCostExecutionPlan(proposals, requirements, snapshot, policy)
+    expect(authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: EVALUATED_AT }, host(proposals))).toMatchObject({
       status: 'authorized',
       mode: 'automatic',
+      dispatchAuthorized: false,
       nonMonetaryApprovalRequired: true
     })
+  })
+
+  it('requires authenticated session evidence from the host boundary', () => {
+    const current = candidate('session', '10')
+    const delegated = candidate('delegated', '5')
+    const snapshot = catalogue([current, delegated])
+    const proposals = [proposal(delegated)]
+    const plan = selectMinimumCostExecutionPlan(proposals, requirements, snapshot, policy)
+    const authority = host(proposals)
+    authority.verifySessionEvidence = () => false
+
+    expect(() => authorizeExecutionPlan(plan, session(current), snapshot, policy, { evaluatedAt: EVALUATED_AT }, authority)).toThrow(/authenticate the active session/)
+  })
+
+  it('rejects a self-hashed decision that does not match recomputed planner evidence', () => {
+    const current = candidate('session', '10')
+    const delegated = candidate('delegated', '5')
+    const snapshot = catalogue([current, delegated])
+    const proposals = [proposal(delegated)]
+    const plan = selectMinimumCostExecutionPlan(proposals, requirements, snapshot, policy)
+    const forged = JSON.parse(JSON.stringify(plan))
+    forged.selected.expectedAggregateP95 = { ...forged.selected.expectedAggregateP95, numerator: '0', denominator: '1', amount: '0.00' }
+    forged.selected.maximumPathP95 = { ...forged.selected.maximumPathP95, numerator: '0', denominator: '1', amount: '0.00' }
+    forged.qualified[0] = forged.selected
+    const payload = { ...forged }
+    delete payload.id
+    forged.id = stableFingerprint(payload)
+
+    expect(() => authorizeExecutionPlan(forged, session(current), snapshot, policy, { evaluatedAt: EVALUATED_AT }, host(proposals))).toThrow(/recomputed authoritative planner evidence/)
   })
 })

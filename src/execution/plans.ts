@@ -83,6 +83,11 @@ const TIE_BREAK_RULES: ExecutionPlanTieBreakDecision['rule'][] = [
   'canonical-proposal-id'
 ]
 const FINGERPRINT = /^[a-f0-9]{64}$/
+const MAX_PLAN_NODES = 64
+const MAX_OUTCOMES_PER_NODE = 16
+const MAX_PUBLIC_LIST_ENTRIES = 64
+const MAX_DECISION_PLANS = 256
+const MAX_DECISION_EXCLUSIONS = MAX_DECISION_PLANS * MAX_PLAN_NODES
 
 export type ExecutionPlanNodeRole = 'primary' | 'validation' | 'retry' | 'fallback'
 export type ExecutionOutcomeCode = 'success' | 'execution-failed' | 'validation-failed' | 'candidate-unavailable'
@@ -268,6 +273,7 @@ function validateUniqueIds(value: unknown, allowed: readonly string[] | null, la
     issues.push(`${label} must contain safe public identifiers`)
     return
   }
+  if (value.length > MAX_PUBLIC_LIST_ENTRIES) issues.push(`${label} must contain at most ${MAX_PUBLIC_LIST_ENTRIES} entries`)
   if (allowed && value.some((entry) => !allowed.includes(entry as string))) issues.push(`${label} contains unsupported values`)
   if (new Set(value).size !== value.length) issues.push(`${label} must not contain duplicates`)
 }
@@ -280,7 +286,7 @@ export function assertExecutionPlanProposal(value: unknown): asserts value is Ex
   if (value.schemaVersion !== 1) issues.push('schemaVersion must equal 1')
   if (!safeId(value.id)) issues.push('id must be a safe public identifier')
   if (!safeId(value.rootNodeId)) issues.push('rootNodeId must be a safe public identifier')
-  if (!Array.isArray(value.nodes) || value.nodes.length === 0) issues.push('nodes must be a non-empty array')
+  if (!Array.isArray(value.nodes) || value.nodes.length === 0 || value.nodes.length > MAX_PLAN_NODES) issues.push(`nodes must contain between 1 and ${MAX_PLAN_NODES} entries`)
   else {
     const nodeIds = new Set<string>()
     value.nodes.forEach((rawNode, nodeIndex) => {
@@ -304,7 +310,7 @@ export function assertExecutionPlanProposal(value: unknown): asserts value is Ex
         else {
           rejectUnknown(rawNode.estimate.usageP95, PRICE_DIMENSIONS, `${label}.estimate.usageP95`, issues)
           for (const [dimension, quantity] of Object.entries(rawNode.estimate.usageP95)) {
-            if (typeof quantity !== 'string' || !DECIMAL.test(quantity)) issues.push(`${label}.estimate.usageP95.${dimension} must be a non-negative decimal string`)
+            if (typeof quantity !== 'string' || quantity.length > 256 || !DECIMAL.test(quantity)) issues.push(`${label}.estimate.usageP95.${dimension} must be a bounded non-negative decimal string`)
           }
         }
         if (rawNode.estimate.latencyP95Ms !== null && (!Number.isSafeInteger(rawNode.estimate.latencyP95Ms) || Number(rawNode.estimate.latencyP95Ms) < 0))
@@ -316,7 +322,8 @@ export function assertExecutionPlanProposal(value: unknown): asserts value is Ex
         if (!safeId(rawNode.estimate.evidenceRef)) issues.push(`${label}.estimate.evidenceRef must be a safe public identifier`)
         if (!safeId(rawNode.estimate.independenceDomain)) issues.push(`${label}.estimate.independenceDomain must be a safe public identifier`)
       }
-      if (!Array.isArray(rawNode.outcomes) || rawNode.outcomes.length === 0) issues.push(`${label}.outcomes must be a non-empty array`)
+      if (!Array.isArray(rawNode.outcomes) || rawNode.outcomes.length === 0 || rawNode.outcomes.length > MAX_OUTCOMES_PER_NODE)
+        issues.push(`${label}.outcomes must contain between 1 and ${MAX_OUTCOMES_PER_NODE} entries`)
       else
         rawNode.outcomes.forEach((rawOutcome, outcomeIndex) => {
           const outcomeLabel = `${label}.outcomes[${outcomeIndex}]`
@@ -326,8 +333,8 @@ export function assertExecutionPlanProposal(value: unknown): asserts value is Ex
           }
           rejectUnknown(rawOutcome, OUTCOME_FIELDS, outcomeLabel, issues)
           if (!OUTCOMES.includes(rawOutcome.code as ExecutionOutcomeCode)) issues.push(`${outcomeLabel}.code is unsupported`)
-          if (typeof rawOutcome.conditionalProbability !== 'string' || !DECIMAL.test(rawOutcome.conditionalProbability))
-            issues.push(`${outcomeLabel}.conditionalProbability must be a non-negative decimal string`)
+          if (typeof rawOutcome.conditionalProbability !== 'string' || rawOutcome.conditionalProbability.length > 256 || !DECIMAL.test(rawOutcome.conditionalProbability))
+            issues.push(`${outcomeLabel}.conditionalProbability must be a bounded non-negative decimal string`)
           if (rawOutcome.nextNodeId !== undefined && !safeId(rawOutcome.nextNodeId)) issues.push(`${outcomeLabel}.nextNodeId must be a safe public identifier when present`)
           if (!safeId(rawOutcome.evidenceRef)) issues.push(`${outcomeLabel}.evidenceRef must be a safe public identifier`)
         })
@@ -364,7 +371,7 @@ function validateQualifiedPlan(value: unknown, label: string, issues: string[]):
   if (typeof value.approvalRequired !== 'boolean') issues.push(`${label}.approvalRequired must be a boolean`)
   validateUniqueIds(value.checks, CHECKS, `${label}.checks`, issues)
   validateUniqueIds(value.evidenceRefs, null, `${label}.evidenceRefs`, issues)
-  if (!Array.isArray(value.nodeCosts) || value.nodeCosts.length === 0) issues.push(`${label}.nodeCosts must be a non-empty array`)
+  if (!Array.isArray(value.nodeCosts) || value.nodeCosts.length === 0 || value.nodeCosts.length > MAX_PLAN_NODES) issues.push(`${label}.nodeCosts must contain between 1 and ${MAX_PLAN_NODES} entries`)
   else {
     const nodeIds = new Set<string>()
     value.nodeCosts.forEach((rawCost, index) => {
@@ -428,7 +435,7 @@ export function assertExecutionPlanDecision(value: unknown): asserts value is Ex
   let selectedValid = false
   if (value.selected !== undefined) selectedValid = validateQualifiedPlan(value.selected, 'decision.selected', issues)
   if (selectedStatus !== (value.selected !== undefined)) issues.push('decision.selected must exist exactly when status is selected')
-  if (!Array.isArray(value.qualified)) issues.push('decision.qualified must be an array')
+  if (!Array.isArray(value.qualified) || value.qualified.length > MAX_DECISION_PLANS) issues.push(`decision.qualified must contain at most ${MAX_DECISION_PLANS} entries`)
   else {
     value.qualified.forEach((plan, index) => validateQualifiedPlan(plan, `decision.qualified[${index}]`, issues))
     const proposalIds = value.qualified
@@ -440,7 +447,7 @@ export function assertExecutionPlanDecision(value: unknown): asserts value is Ex
     if (selectedStatus && (value.qualified.length === 0 || !selectedValid || stableFingerprint(value.selected) !== stableFingerprint(value.qualified[0])))
       issues.push('decision.selected must equal the first qualified plan')
   }
-  if (!Array.isArray(value.exclusions)) issues.push('decision.exclusions must be an array')
+  if (!Array.isArray(value.exclusions) || value.exclusions.length > MAX_DECISION_EXCLUSIONS) issues.push(`decision.exclusions must contain at most ${MAX_DECISION_EXCLUSIONS} entries`)
   else
     value.exclusions.forEach((rawExclusion, index) => {
       const label = `decision.exclusions[${index}]`
@@ -457,7 +464,7 @@ export function assertExecutionPlanDecision(value: unknown): asserts value is Ex
       if (!EXCLUSION_CODES.includes(rawExclusion.code as ExecutionPlanExclusionCode)) issues.push(`${label}.code is unsupported`)
       if (rawExclusion.detailCode !== undefined && !safeId(rawExclusion.detailCode)) issues.push(`${label}.detailCode must be a safe public identifier`)
     })
-  if (!Array.isArray(value.tieBreakDecisions)) issues.push('decision.tieBreakDecisions must be an array')
+  if (!Array.isArray(value.tieBreakDecisions) || value.tieBreakDecisions.length > MAX_DECISION_PLANS) issues.push(`decision.tieBreakDecisions must contain at most ${MAX_DECISION_PLANS} entries`)
   else
     value.tieBreakDecisions.forEach((rawTieBreak, index) => {
       const label = `decision.tieBreakDecisions[${index}]`
