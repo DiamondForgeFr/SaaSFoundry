@@ -4,11 +4,13 @@ import {
   createExecutionCandidateId,
   createExecutionLineage,
   explainExecutionDecision,
+  recordExecutionOutcome,
   selectMinimumCostExecutionPlan,
   stableFingerprint,
   type ExecutionBudgetDecision,
   type ExecutionCandidate,
   type ExecutionCandidateCatalogueSnapshot,
+  type ExecutionDispatchBinding,
   type ExecutionPlanProposal,
   type ExecutionPlanSelectionPolicy
 } from '../../../execution'
@@ -130,14 +132,54 @@ describe('execution decision explanations (#735)', () => {
     const selected = decision.selected!
     const authority = budgetDecision(decision.id, selected.proposalFingerprint, selected.expectedAggregateP95)
     const lineage = createExecutionLineage(decision, 'scope/1', ['execution/initial'], { runId: 'run/host-unique', taskFingerprint: requirements.taskFingerprint, maxAttempts: 4, maxReplans: 2 })
-    const before = JSON.stringify({ decision, authority, lineage })
+    const outcomeBinding: ExecutionDispatchBinding = {
+      runId: lineage.runId,
+      lineageId: lineage.id,
+      lineageRevision: lineage.revision,
+      historyHead: lineage.historyHead,
+      attemptId: lineage.currentAttemptId,
+      dispatchPermitId: 'permit/initial',
+      planDecisionId: decision.id,
+      proposalFingerprint: selected.proposalFingerprint,
+      nodeId: 'primary',
+      candidateId: selected.rootCandidateId,
+      retryOrdinal: 0,
+      cohort: {
+        candidateId: selected.rootCandidateId,
+        effort: selected.rootEffort,
+        runtimeKind: selected.rootRuntimeKind,
+        workloadClass: 'code/mechanical',
+        privacyBoundary: 'provider-managed',
+        tenantBoundaryId: 'tenant/acme'
+      }
+    }
+    const outcome = recordExecutionOutcome(
+      {
+        schemaVersion: 1,
+        eventId: 'event/initial',
+        binding: outcomeBinding,
+        occurredAt: '2026-09-12T12:01:00.000Z',
+        receivedAt: '2026-09-12T12:01:01.000Z',
+        outcome: 'success',
+        actualUsage: { request: '1' },
+        metering: 'complete',
+        latencyMs: 900,
+        validation: { result: 'passed', checks: ['type-check'] },
+        sourceKind: 'provider-settlement',
+        evidenceRefs: ['receipt/initial']
+      },
+      outcomeBinding,
+      { verifyOutcomeEvidence: () => true, appendOutcome: (record) => ({ status: 'accepted', outcomeId: record.id }) }
+    )
+    const before = JSON.stringify({ decision, authority, lineage, outcome })
 
-    const explanation = explainExecutionDecision(decision, { budgetDecision: authority, lineage })
+    const explanation = explainExecutionDecision(decision, { budgetDecision: authority, lineage, outcomes: [outcome] })
 
     expect(explanation.authority).toMatchObject({ status: 'authorized', reasonCode: 'within-session-authority', dispatchAuthorized: true })
     expect(explanation.lineage).toMatchObject({ runId: 'run/host-unique', revision: 1, attemptCount: 1, lastTrigger: 'initial' })
-    expect(explanation.evidenceRefs).toEqual(expect.arrayContaining(['execution/initial', 'benchmarks/plan/cheap', 'rates/plan/cheap']))
-    expect(JSON.stringify({ decision, authority, lineage })).toBe(before)
+    expect(explanation.outcomes).toEqual([expect.objectContaining({ outcome: 'success', actualUsage: { request: '1' }, latencyMs: 900, validation: { result: 'passed', checks: ['type-check'] } })])
+    expect(explanation.evidenceRefs).toEqual(expect.arrayContaining(['execution/initial', 'benchmarks/plan/cheap', 'rates/plan/cheap', 'receipt/initial']))
+    expect(JSON.stringify({ decision, authority, lineage, outcome })).toBe(before)
   })
 
   it('rejects mismatched authority, lineage, unsupported inputs, and tampered explanations', () => {
