@@ -1,4 +1,5 @@
 import {
+  assertExecutionPlanDecision,
   classifyTaskIntent,
   createExecutionCandidateId,
   selectMinimumCostExecutionPlan,
@@ -124,6 +125,19 @@ describe('deterministic minimum-cost plan selection (#725)', () => {
     expect(Object.isFrozen(decision.selected?.nodeCosts)).toBe(true)
     expect(serialized).not.toContain('raw prompt')
     expect(serialized).not.toContain('credential-shaped')
+    expect(() => assertExecutionPlanDecision(JSON.parse(serialized))).not.toThrow()
+  })
+
+  it('rejects tampered or opaque serialized decision ledgers', () => {
+    const entry = candidate('valid', 'medium', '1')
+    const decision = selectMinimumCostExecutionPlan([proposal('plan/valid', entry)], requirements, catalogue([entry]), policy)
+    const tampered = JSON.parse(JSON.stringify(decision)) as Record<string, unknown>
+    const selected = tampered.selected as Record<string, unknown>
+    ;(selected.expectedAggregateP95 as Record<string, unknown>).amount = '0.0000'
+    tampered.providerPayload = { authorization: 'Bearer secret-value' }
+
+    expect(() => assertExecutionPlanDecision(tampered)).toThrow(/unsupported fields|amount|canonical payload/)
+    expect(() => assertExecutionPlanDecision(tampered)).not.toThrow(/secret-value/)
   })
 
   it('returns a stable unplannable decision when no proposal qualifies', () => {
