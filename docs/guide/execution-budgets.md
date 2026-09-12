@@ -51,6 +51,9 @@ If evidence changes before dispatch, the host must rebuild the catalogue, replan
 execution lineage: dispatched p95 reservations become sunk cost, and every recovery plan receives fresh authority. Future calibration may improve workload and price evidence, but it does not rewrite a
 completed authority decision.
 
+[Decision explanations](./execution-explanations.md) expose the authority reason, exact baseline and increments, and any independent approval gate.
+[Authenticated outcome calibration](./execution-calibration.md) may refine future estimates, but settled cost never refunds a reservation or expands authority for the current lineage.
+
 The envelope applies to one plan decision. It is not a reusable session wallet. Replanning may compare cumulative reservations only within the current execution lineage, and p95 estimates do not
 guarantee the final provider invoice.
 

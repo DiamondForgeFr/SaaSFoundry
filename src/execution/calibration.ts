@@ -514,6 +514,7 @@ export function assertExecutionCalibrationSnapshot(value: unknown): asserts valu
   if (!Number.isSafeInteger(value.sampleCount) || Number(value.sampleCount) < 2 || Number(value.sampleCount) > MAX_OUTCOMES) issues.push('calibration snapshot sample count is invalid')
   if (!Number.isSafeInteger(value.censoredCount) || Number(value.censoredCount) < 0 || Number(value.censoredCount) > MAX_OUTCOMES) issues.push('calibration snapshot censored count is invalid')
   const usage = normalizeUsage(value.usageP95, 'calibration snapshot.usageP95', issues, false)
+  if (stableFingerprint(usage) !== stableFingerprint(value.usageP95)) issues.push('calibration snapshot usage must be canonical')
   if (value.latencyP95Ms !== null && (!Number.isSafeInteger(value.latencyP95Ms) || Number(value.latencyP95Ms) < 0 || Number(value.latencyP95Ms) > MAX_LATENCY_MS))
     issues.push('calibration snapshot latency must be null or a bounded non-negative integer')
   const sourceOutcomeIds = Array.isArray(value.sourceOutcomeIds) ? value.sourceOutcomeIds : null

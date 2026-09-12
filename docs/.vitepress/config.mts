@@ -109,6 +109,8 @@ export default defineConfig({
             { text: 'Execution Planning', link: '/guide/execution-planning' },
             { text: 'Execution Budgets', link: '/guide/execution-budgets' },
             { text: 'Execution Replanning', link: '/guide/execution-replanning' },
+            { text: 'Execution Explanations', link: '/guide/execution-explanations' },
+            { text: 'Execution Calibration', link: '/guide/execution-calibration' },
             { text: 'Workflow System', link: '/guide/workflow-system' },
             { text: 'Skills System', link: '/guide/skills-system' },
             { text: 'Module System', link: '/guide/module-system' },
