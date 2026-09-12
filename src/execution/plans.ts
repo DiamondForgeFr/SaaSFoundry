@@ -1,5 +1,5 @@
 import type { ValidationCheck } from './requirements'
-import type { NormalizedEffort, PriceDimensionKind } from './types'
+import type { NormalizedEffort, PriceDimensionKind, RuntimeKind } from './types'
 
 const SAFE_ID = /^[a-z0-9][a-z0-9._:/-]{0,127}$/i
 const SECRET_LIKE = /(?:\bBearer\s+|\b(?:sk|gh[pousr]|github_pat|xox[baprs])[_-]|\beyJ[a-zA-Z0-9_-]{8,}\.)/i
@@ -97,11 +97,13 @@ export interface QualifiedExecutionPlan {
   proposalFingerprint: string
   rootCandidateId: string
   rootEffort: NormalizedEffort
+  rootRuntimeKind: RuntimeKind
   rootBoundary: string
   nodeCount: number
   maximumPathLatencyP95Ms: number | null
   approvalRequired: boolean
   checks: ValidationCheck[]
+  evidenceRefs: string[]
   nodeCosts: ExecutionPlanNodeCost[]
   expectedAggregateP95: ExactCostEvidence
   maximumPathP95: ExactCostEvidence
@@ -150,6 +152,7 @@ export interface ExecutionPlanDecision {
   status: 'selected' | 'unplannable' | 'requirements-unsatisfiable'
   requirementsId: string
   catalogueGeneratedAt: string
+  catalogueFingerprint: string
   planningAt: string
   policyFingerprint: string
   selected?: QualifiedExecutionPlan
