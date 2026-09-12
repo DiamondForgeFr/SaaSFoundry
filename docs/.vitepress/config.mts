@@ -106,6 +106,8 @@ export default defineConfig({
             { text: 'Agent Coexistence', link: '/guide/agent-coexistence' },
             { text: 'Execution Candidates', link: '/guide/execution-candidates' },
             { text: 'Execution Requirements', link: '/guide/execution-requirements' },
+            { text: 'Execution Planning', link: '/guide/execution-planning' },
+            { text: 'Execution Budgets', link: '/guide/execution-budgets' },
             { text: 'Workflow System', link: '/guide/workflow-system' },
             { text: 'Skills System', link: '/guide/skills-system' },
             { text: 'Module System', link: '/guide/module-system' },
