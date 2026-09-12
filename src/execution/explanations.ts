@@ -1,10 +1,14 @@
 import type { ExecutionBudgetDecision, ExecutionRecoveryBudgetDecision } from './budget'
 import { assertExecutionOutcomeEvidence, type ExecutionOutcomeEvidence } from './calibration'
+import { assertExactCostEvidence } from './exact-cost'
 import { stableFingerprint } from './overrides'
 import { assertExecutionPlanDecision, type BillableUsageP95, type ExactCostEvidence, type ExecutionPlanDecision, type ExecutionPlanExclusionCode, type ExecutionPlanTieBreakDecision } from './plans'
 import { assertExecutionLineage, type ExecutionLineage, type ExecutionLineageTerminalState, type ExecutionObservedOutcome, type ExecutionReplanTrigger } from './replanning'
 
 const FINGERPRINT = /^[a-f0-9]{64}$/
+const SAFE_ID = /^[a-z0-9][a-z0-9._:/-]{0,127}$/i
+const SECRET_LIKE =
+  /(?:\bBearer\s+|\b(?:sk|gh[pousr]|github_pat|xox[baprs])[_-]|\beyJ[a-zA-Z0-9_-]{8,}\.|(?:api[_-]?key|authorization|client[_-]?secret|cookie|credentials?|password|private[_-]?key|refresh[_-]?token|session[_-]?id|access[_-]?token|token)\s*[:=])/i
 const EXPLANATION_FIELDS = [
   'schemaVersion',
   'id',
@@ -151,10 +155,68 @@ function cloneCost(value: ExactCostEvidence): ExactCostEvidence {
   return { ...value }
 }
 
+function safeId(value: unknown): value is string {
+  return typeof value === 'string' && SAFE_ID.test(value) && !SECRET_LIKE.test(value)
+}
+
 function authorityExplanation(value: ExecutionBudgetDecision | ExecutionRecoveryBudgetDecision, planDecisionId: string): ExecutionAuthorityExplanation {
-  if (value === null || typeof value !== 'object' || Array.isArray(value) || value.schemaVersion !== 1 || !FINGERPRINT.test(value.id) || stableFingerprint(withoutId(value)) !== value.id)
+  const fields = [
+    'schemaVersion',
+    'id',
+    'status',
+    'mode',
+    'reasonCode',
+    'evaluatedAt',
+    'planDecisionId',
+    'proposalFingerprint',
+    'sessionEnvelopeId',
+    'sessionId',
+    'sessionCandidateId',
+    'sessionEffort',
+    'workloadFingerprint',
+    'authorityRevision',
+    'currency',
+    'expectedAggregateP95',
+    'maximumPathP95',
+    'baselineP95',
+    'dispatchAuthorized',
+    'nonMonetaryApprovalRequired',
+    'challenge',
+    'approvalEventId',
+    'runId',
+    'lineageRevision',
+    'historyHead',
+    'spentP95',
+    'remainingAutomaticAuthorityP95',
+    'recoveryExpectedTotalP95',
+    'recoveryMaximumTotalP95'
+  ]
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).some((field) => !fields.includes(field)) ||
+    value.schemaVersion !== 1 ||
+    !FINGERPRINT.test(value.id) ||
+    stableFingerprint(withoutId(value)) !== value.id
+  )
     throw new ExecutionExplanationContractError(['budget decision must be an immutable fingerprinted decision'])
   if (value.planDecisionId !== planDecisionId) throw new ExecutionExplanationContractError(['budget decision must reference the explained plan'])
+  if (!['authorized', 'approval-required', 'rejected'].includes(value.status) || ![null, 'automatic', 'approved-increment'].includes(value.mode))
+    throw new ExecutionExplanationContractError(['budget decision status or mode is unsupported'])
+  if (!safeId(value.reasonCode) || typeof value.dispatchAuthorized !== 'boolean' || typeof value.nonMonetaryApprovalRequired !== 'boolean')
+    throw new ExecutionExplanationContractError(['budget decision contains unsafe explanation facts'])
+  try {
+    assertExactCostEvidence(value.baselineP95, 'budget baseline')
+    if (value.expectedAggregateP95) assertExactCostEvidence(value.expectedAggregateP95, 'budget expected cost')
+    if (value.maximumPathP95) assertExactCostEvidence(value.maximumPathP95, 'budget maximum cost')
+    if (value.challenge) {
+      assertExactCostEvidence(value.challenge.expectedIncrement, 'budget expected increment')
+      assertExactCostEvidence(value.challenge.pathIncrement, 'budget path increment')
+    }
+  } catch {
+    throw new ExecutionExplanationContractError(['budget decision contains invalid exact cost evidence'])
+  }
   const challenge = value.challenge
   const recovery = 'runId' in value ? value : undefined
   return {

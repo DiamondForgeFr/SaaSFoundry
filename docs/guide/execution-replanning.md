@@ -94,3 +94,6 @@ const authority = authorizeExecutionRecovery(
 
 Dispatch only an `authorized` decision with `dispatchAuthorized === true`, using an atomic host reservation and idempotency key. Persist raw prompts, model output, provider errors, credentials, and
 tool arguments outside these public records.
+
+[Decision explanations](./execution-explanations.md) combine the immutable replan, authority, lineage, and authenticated outcome facts. [Calibration](./execution-calibration.md) may use eligible
+outcomes to improve a later plan, while leaving this lineage and all of its reservations unchanged.
