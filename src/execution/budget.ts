@@ -35,6 +35,9 @@ const ENVELOPE_FIELDS = [
 const JUSTIFICATION_FIELDS = ['reasonCode', 'expectedBenefitCodes', 'evidenceRefs'] as const
 const GRANT_FIELDS = ['schemaVersion', 'id', 'challengeId', 'sessionId', 'planDecisionId', 'expectedIncrement', 'pathIncrement', 'approvedAt', 'validUntil', 'approvedByRef'] as const
 const AUTHORIZATION_FIELDS = ['evaluatedAt', 'justification', 'approval'] as const
+const RECOVERY_FIELDS = ['schemaVersion', 'runId', 'revision', 'historyHead', 'reservations'] as const
+const RESERVATION_FIELDS = ['attemptId', 'reservedInvocationP95'] as const
+const MAX_RECOVERY_RESERVATIONS = 64
 
 export type ExecutionBudgetApprovalReasonCode = (typeof REASONS)[number]
 export type ExecutionBudgetBenefitCode = (typeof BENEFITS)[number]
@@ -151,6 +154,43 @@ export interface ExecutionBudgetDecision {
   approvalEventId?: string
 }
 
+export interface ExecutionRecoveryReservation {
+  attemptId: string
+  /** Permanently reserved p95 cost for an attempt that reached dispatch. */
+  reservedInvocationP95: ExactCostEvidence
+}
+
+/** Host-authenticated cumulative evidence for one execution lineage. */
+export interface ExecutionRecoveryBudgetEvidence {
+  schemaVersion: 1
+  runId: string
+  revision: number
+  /** Hash of the append-only attempt history at this revision. */
+  historyHead: string
+  reservations: ExecutionRecoveryReservation[]
+}
+
+export interface ExecutionRecoveryBudgetApprovalChallenge extends ExecutionBudgetApprovalChallenge {
+  runId: string
+  lineageRevision: number
+  historyHead: string
+  spentP95: ExactCostEvidence
+  remainingAutomaticAuthorityP95: ExactCostEvidence
+  recoveryExpectedTotalP95: ExactCostEvidence
+  recoveryMaximumTotalP95: ExactCostEvidence
+}
+
+export interface ExecutionRecoveryBudgetDecision extends Omit<ExecutionBudgetDecision, 'challenge'> {
+  runId: string
+  lineageRevision: number
+  historyHead: string
+  spentP95: ExactCostEvidence
+  remainingAutomaticAuthorityP95: ExactCostEvidence
+  recoveryExpectedTotalP95?: ExactCostEvidence
+  recoveryMaximumTotalP95?: ExactCostEvidence
+  challenge?: ExecutionRecoveryBudgetApprovalChallenge
+}
+
 export interface ExecutionBudgetAuthorizationInput {
   evaluatedAt: string
   justification?: unknown
@@ -166,6 +206,10 @@ export interface ExecutionBudgetHostAuthority {
   proposals: readonly unknown[]
   verifySessionEvidence(evidence: Readonly<SessionWorkloadEvidence>): boolean
   consumeApprovalGrant(grant: Readonly<ExecutionBudgetApprovalGrant>, challenge: Readonly<ExecutionBudgetApprovalChallenge>): boolean
+}
+
+export interface ExecutionRecoveryBudgetHostAuthority extends ExecutionBudgetHostAuthority {
+  verifyRecoveryHistory(evidence: Readonly<ExecutionRecoveryBudgetEvidence>): boolean
 }
 
 export class ExecutionBudgetContractError extends Error {
@@ -220,6 +264,52 @@ function canonicalUsage(value: unknown, issues: string[]): BillableUsageP95 {
   for (const [dimension, quantity] of entries)
     if (typeof quantity !== 'string' || quantity.length > 256 || !DECIMAL.test(quantity)) issues.push(`session.usageP95.${dimension} must be a bounded non-negative decimal string`)
   return Object.fromEntries(entries) as BillableUsageP95
+}
+
+function normalizeRecoveryEvidence(value: unknown, currency: string, scale: number): { evidence: ExecutionRecoveryBudgetEvidence; spent: ExactRational } {
+  const issues: string[] = []
+  if (!object(value)) throw new ExecutionBudgetContractError(['recovery evidence must be an object'])
+  rejectUnknown(value, RECOVERY_FIELDS, 'recovery evidence', issues)
+  if (value.schemaVersion !== 1) issues.push('recovery evidence schemaVersion must equal 1')
+  if (!safeId(value.runId)) issues.push('recovery evidence runId must be a safe public identifier')
+  if (!Number.isSafeInteger(value.revision) || Number(value.revision) < 1 || Number(value.revision) > 1_000_000) issues.push('recovery evidence revision must be a bounded positive integer')
+  if (typeof value.historyHead !== 'string' || !FINGERPRINT.test(value.historyHead)) issues.push('recovery evidence historyHead must be a SHA-256 fingerprint')
+  if (!Array.isArray(value.reservations) || value.reservations.length > MAX_RECOVERY_RESERVATIONS)
+    issues.push(`recovery evidence reservations must contain at most ${MAX_RECOVERY_RESERVATIONS} entries`)
+  const reservations: ExecutionRecoveryReservation[] = []
+  let spent = new ExactRational(0n)
+  if (Array.isArray(value.reservations) && value.reservations.length <= MAX_RECOVERY_RESERVATIONS) {
+    for (const [index, entry] of value.reservations.entries()) {
+      if (!object(entry)) {
+        issues.push(`recovery evidence reservations[${index}] must be an object`)
+        continue
+      }
+      rejectUnknown(entry, RESERVATION_FIELDS, `recovery evidence reservations[${index}]`, issues)
+      if (!safeId(entry.attemptId)) issues.push(`recovery evidence reservations[${index}].attemptId must be a safe public identifier`)
+      try {
+        assertExactCostEvidence(entry.reservedInvocationP95, `recovery evidence reservations[${index}].reservedInvocationP95`)
+        if (object(entry.reservedInvocationP95) && (entry.reservedInvocationP95.currency !== currency || entry.reservedInvocationP95.scale !== scale))
+          issues.push(`recovery evidence reservations[${index}] must use the session currency and display scale`)
+        else if (object(entry.reservedInvocationP95)) spent = spent.add(ExactRational.evidence(entry.reservedInvocationP95 as unknown as ExactCostEvidence))
+      } catch (error) {
+        issues.push(error instanceof Error ? error.message : `recovery evidence reservations[${index}] is invalid`)
+      }
+      if (safeId(entry.attemptId) && object(entry.reservedInvocationP95))
+        reservations.push({ attemptId: entry.attemptId, reservedInvocationP95: entry.reservedInvocationP95 as unknown as ExactCostEvidence })
+    }
+  }
+  if (new Set(reservations.map((entry) => entry.attemptId)).size !== reservations.length) issues.push('recovery evidence attemptId values must be unique')
+  if (issues.length) throw new ExecutionBudgetContractError(issues)
+  return {
+    evidence: freeze({
+      schemaVersion: 1,
+      runId: value.runId as string,
+      revision: value.revision as number,
+      historyHead: value.historyHead as string,
+      reservations: reservations.sort((left, right) => left.attemptId.localeCompare(right.attemptId))
+    }),
+    spent
+  }
 }
 
 function validateSelectionPolicy(policy: ExecutionPlanSelectionPolicy): void {
@@ -406,6 +496,10 @@ function decision(value: Omit<ExecutionBudgetDecision, 'id'>): ExecutionBudgetDe
   return finalize(value)
 }
 
+function recoveryDecision(value: Omit<ExecutionRecoveryBudgetDecision, 'id'>): ExecutionRecoveryBudgetDecision {
+  return finalize(value)
+}
+
 /** Applies the session-derived monetary gate without weakening other approvals. */
 export function authorizeExecutionPlan(
   planValue: unknown,
@@ -504,6 +598,164 @@ export function authorizeExecutionPlan(
     reasonCode: 'approval-granted',
     dispatchAuthorized: !selected.approvalRequired,
     challenge: approvalChallenge,
+    approvalEventId: input.approval.id
+  })
+}
+
+/** Re-authorizes a fresh recovery plan against authority remaining in one execution lineage. */
+export function authorizeExecutionRecovery(
+  planValue: unknown,
+  sessionValue: unknown,
+  catalogue: ExecutionCandidateCatalogueSnapshot,
+  policy: ExecutionPlanSelectionPolicy,
+  recoveryValue: unknown,
+  input: ExecutionBudgetAuthorizationInput,
+  host: ExecutionRecoveryBudgetHostAuthority
+): ExecutionRecoveryBudgetDecision {
+  assertExecutionPlanDecision(planValue)
+  const plan = planValue
+  const envelope = deriveSessionBudgetEnvelope(sessionValue, catalogue, policy)
+  if (
+    !object(host) ||
+    !Array.isArray(host.proposals) ||
+    !object(host.requirements) ||
+    typeof host.verifySessionEvidence !== 'function' ||
+    typeof host.consumeApprovalGrant !== 'function' ||
+    typeof host.verifyRecoveryHistory !== 'function'
+  )
+    throw new ExecutionBudgetContractError(['recovery host authority must supply planner evidence and authentication callbacks'])
+  const recomputedPlan = selectMinimumCostExecutionPlan(host.proposals, host.requirements as ExecutionRequirementSet, catalogue, policy)
+  if (recomputedPlan.id !== plan.id) throw new ExecutionBudgetContractError(['recovery plan decision must match recomputed authoritative planner evidence'])
+  const normalizedSession = freeze({
+    schemaVersion: 1 as const,
+    sessionId: envelope.sessionId,
+    candidateId: envelope.candidateId,
+    usageP95: canonicalUsage((sessionValue as SessionWorkloadEvidence).usageP95, []),
+    observedAt: (sessionValue as SessionWorkloadEvidence).observedAt,
+    validUntil: (sessionValue as SessionWorkloadEvidence).validUntil,
+    evidenceRef: (sessionValue as SessionWorkloadEvidence).evidenceRef,
+    authorityRevision: envelope.authorityRevision
+  })
+  let sessionVerified = false
+  try {
+    sessionVerified = host.verifySessionEvidence(normalizedSession) === true
+  } catch {
+    sessionVerified = false
+  }
+  if (!sessionVerified) throw new ExecutionBudgetContractError(['host did not authenticate the active session evidence'])
+  const { evidence, spent } = normalizeRecoveryEvidence(recoveryValue, envelope.currency, envelope.displayScale)
+  let historyVerified = false
+  try {
+    historyVerified = host.verifyRecoveryHistory(evidence) === true
+  } catch {
+    historyVerified = false
+  }
+  if (!historyVerified) throw new ExecutionBudgetContractError(['host did not authenticate the execution lineage history'])
+  if (!object(input)) throw new ExecutionBudgetContractError(['authorization input must be an object'])
+  const inputIssues: string[] = []
+  rejectUnknown(input, AUTHORIZATION_FIELDS, 'authorization input', inputIssues)
+  if (inputIssues.length) throw new ExecutionBudgetContractError(inputIssues)
+  if (!timestamp(input.evaluatedAt)) throw new ExecutionBudgetContractError(['evaluatedAt must be a canonical UTC timestamp'])
+  const spentP95 = exactCostEvidence(spent, envelope.currency, envelope.displayScale)
+  const remainingAutomaticAuthorityP95 = exactCostEvidence(ExactRational.evidence(envelope.baselineP95).subtract(spent).maximum(new ExactRational(0n)), envelope.currency, envelope.displayScale)
+  const common = {
+    schemaVersion: 1 as const,
+    evaluatedAt: input.evaluatedAt,
+    planDecisionId: plan.id,
+    sessionEnvelopeId: envelope.id,
+    sessionId: envelope.sessionId,
+    sessionCandidateId: envelope.candidateId,
+    sessionEffort: envelope.effort,
+    workloadFingerprint: envelope.workloadFingerprint,
+    authorityRevision: envelope.authorityRevision,
+    currency: envelope.currency,
+    baselineP95: envelope.baselineP95,
+    dispatchAuthorized: false,
+    nonMonetaryApprovalRequired: plan.selected?.approvalRequired ?? false,
+    runId: evidence.runId,
+    lineageRevision: evidence.revision,
+    historyHead: evidence.historyHead,
+    spentP95,
+    remainingAutomaticAuthorityP95
+  }
+  if (plan.status !== 'selected' || !plan.selected)
+    return recoveryDecision({
+      ...common,
+      status: 'rejected',
+      mode: null,
+      reasonCode: plan.status === 'requirements-unsatisfiable' ? 'requirements-unsatisfiable' : 'no-qualified-plan'
+    })
+  const selected = plan.selected
+  if (plan.catalogueFingerprint !== envelope.catalogueFingerprint || plan.policyFingerprint !== envelope.policyFingerprint || plan.planningAt !== envelope.planningAt)
+    throw new ExecutionBudgetContractError(['session envelope and recovery plan must share the same planning evidence'])
+  if (selected.expectedAggregateP95.currency !== envelope.currency || selected.maximumPathP95.currency !== envelope.currency)
+    throw new ExecutionBudgetContractError(['session envelope and recovery plan must share one settlement currency'])
+  const validUntil = [selected.validUntil, envelope.validUntil].sort()[0]
+  if (input.evaluatedAt < envelope.planningAt || input.evaluatedAt >= validUntil) throw new ExecutionBudgetContractError(['execution recovery evidence is stale at evaluatedAt'])
+  const recoveryExpectedTotal = spent.add(ExactRational.evidence(selected.expectedAggregateP95))
+  const recoveryMaximumTotal = spent.add(ExactRational.evidence(selected.maximumPathP95))
+  const recoveryExpectedTotalP95 = exactCostEvidence(recoveryExpectedTotal, envelope.currency, envelope.displayScale)
+  const recoveryMaximumTotalP95 = exactCostEvidence(recoveryMaximumTotal, envelope.currency, envelope.displayScale)
+  const selectedCommon = {
+    ...common,
+    proposalFingerprint: selected.proposalFingerprint,
+    expectedAggregateP95: selected.expectedAggregateP95,
+    maximumPathP95: selected.maximumPathP95,
+    recoveryExpectedTotalP95,
+    recoveryMaximumTotalP95,
+    nonMonetaryApprovalRequired: selected.approvalRequired
+  }
+  if (recoveryExpectedTotal.compare(ExactRational.evidence(envelope.baselineP95)) <= 0 && recoveryMaximumTotal.compare(ExactRational.evidence(envelope.baselineP95)) <= 0) {
+    if (input.approval !== undefined) throw new ExecutionBudgetContractError(['approval must not be attached when recovery is within remaining session authority'])
+    return recoveryDecision({ ...selectedCommon, status: 'authorized', mode: 'automatic', reasonCode: 'within-session-authority', dispatchAuthorized: !selected.approvalRequired })
+  }
+  const justification = validateJustification(input.justification)
+  const baseChallenge = challenge(plan, envelope, justification)
+  const recoveryChallenge = finalize({
+    schemaVersion: 1 as const,
+    sessionId: baseChallenge.sessionId,
+    authorityRevision: baseChallenge.authorityRevision,
+    planDecisionId: baseChallenge.planDecisionId,
+    proposalFingerprint: baseChallenge.proposalFingerprint,
+    requirementsId: baseChallenge.requirementsId,
+    catalogueFingerprint: baseChallenge.catalogueFingerprint,
+    policyFingerprint: baseChallenge.policyFingerprint,
+    workloadFingerprint: baseChallenge.workloadFingerprint,
+    currency: baseChallenge.currency,
+    quotedAt: baseChallenge.quotedAt,
+    validUntil: baseChallenge.validUntil,
+    baselineP95: baseChallenge.baselineP95,
+    expectedAggregateP95: baseChallenge.expectedAggregateP95,
+    maximumPathP95: baseChallenge.maximumPathP95,
+    expectedIncrement: exactCostEvidence(recoveryExpectedTotal.subtract(ExactRational.evidence(envelope.baselineP95)).maximum(new ExactRational(0n)), envelope.currency, envelope.displayScale),
+    pathIncrement: exactCostEvidence(recoveryMaximumTotal.subtract(ExactRational.evidence(envelope.baselineP95)).maximum(new ExactRational(0n)), envelope.currency, envelope.displayScale),
+    justification,
+    nonMonetaryApprovalRequired: baseChallenge.nonMonetaryApprovalRequired,
+    runId: evidence.runId,
+    lineageRevision: evidence.revision,
+    historyHead: evidence.historyHead,
+    spentP95,
+    remainingAutomaticAuthorityP95,
+    recoveryExpectedTotalP95,
+    recoveryMaximumTotalP95
+  })
+  if (input.approval === undefined) return recoveryDecision({ ...selectedCommon, status: 'approval-required', mode: null, reasonCode: 'plan-exceeds-session-authority', challenge: recoveryChallenge })
+  if (!validateGrant(input.approval, recoveryChallenge, input.evaluatedAt))
+    return recoveryDecision({ ...selectedCommon, status: 'rejected', mode: null, reasonCode: 'approval-scope-mismatch', challenge: recoveryChallenge })
+  let consumed = false
+  try {
+    consumed = host.consumeApprovalGrant(input.approval, recoveryChallenge) === true
+  } catch {
+    consumed = false
+  }
+  if (!consumed) return recoveryDecision({ ...selectedCommon, status: 'rejected', mode: null, reasonCode: 'approval-host-rejected', challenge: recoveryChallenge })
+  return recoveryDecision({
+    ...selectedCommon,
+    status: 'authorized',
+    mode: 'approved-increment',
+    reasonCode: 'approval-granted',
+    dispatchAuthorized: !selected.approvalRequired,
+    challenge: recoveryChallenge,
     approvalEventId: input.approval.id
   })
 }
