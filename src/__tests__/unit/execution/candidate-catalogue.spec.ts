@@ -56,7 +56,7 @@ function candidate(options: CandidateOptions): ExecutionCandidate {
         }
       ]
     },
-    privacy: { boundary: options.runtimeKind === 'local' ? 'local-device' : 'provider-managed', trainingUse: 'unknown' },
+    privacy: { boundary: options.runtimeKind === 'local' ? 'local-device' : 'provider-managed', trainingUse: 'unknown', retentionDays: null },
     tools: { mode: 'native', supported: ['shell', 'file-edit'], parallelCalls: true, requiresApproval: true },
     source: {
       adapterId: options.adapterId,
@@ -151,7 +151,6 @@ describe('provider-neutral execution candidate catalogue (#677)', () => {
       { name: 'availability-detail', mutate: (entry) => (entry.availability.reason = { code: 'unavailable', detail: secret }) },
       { name: 'pricing-source-unit', mutate: (entry) => (entry.pricing.dimensions[0].sourceUnit = secret) },
       { name: 'privacy-residency', mutate: (entry) => (entry.privacy.dataResidency = [secret]) },
-      { name: 'privacy-retention', mutate: (entry) => (entry.privacy.retention = secret) },
       { name: 'capability', mutate: (entry) => (entry.capabilities = [secret]) },
       { name: 'tool-name', mutate: (entry) => (entry.tools.supported = [secret]) },
       { name: 'source-reference', mutate: (entry) => (entry.source.candidateRef = secret) }
@@ -185,6 +184,22 @@ describe('provider-neutral execution candidate catalogue (#677)', () => {
       expect.objectContaining({ code: 'invalid-candidate', detailCode: 'contract-validation' }),
       expect.objectContaining({ code: 'invalid-candidate', detailCode: 'contract-validation' })
     ])
+  })
+
+  it('normalizes retention as a non-negative day count or explicit unknown value', async () => {
+    const retained = candidate({ adapterId: 'retained', modelId: 'thirty-days' })
+    retained.privacy.retentionDays = 30
+    const unknown = candidate({ adapterId: 'unknown-retention', modelId: 'unknown' })
+    const invalid = candidate({ adapterId: 'invalid-retention', modelId: 'negative' })
+    invalid.privacy.retentionDays = -1
+    const snapshot = await new ExecutionCandidateCatalogue({ clock: () => NOW })
+      .register(adapter('retained', [retained]))
+      .register(adapter('unknown-retention', [unknown]))
+      .register(adapter('invalid-retention', [invalid]))
+      .snapshot()
+
+    expect(snapshot.eligible.map((entry) => entry.privacy.retentionDays)).toEqual([30, null])
+    expect(snapshot.excluded).toEqual([expect.objectContaining({ exclusion: expect.objectContaining({ code: 'invalid-candidate' }) })])
   })
 
   it('publishes only the closed contract and drops opaque adapter metadata', async () => {

@@ -110,6 +110,10 @@ function positiveIntegerOrNull(value: unknown): boolean {
   return value === null || (Number.isInteger(value) && Number(value) > 0)
 }
 
+function nonNegativeIntegerOrNull(value: unknown): boolean {
+  return value === null || (Number.isSafeInteger(value) && Number(value) >= 0)
+}
+
 function stringList(value: unknown, allowEmpty = true): value is string[] {
   return Array.isArray(value) && (allowEmpty || value.length > 0) && value.every(publicText) && new Set(value).size === value.length
 }
@@ -188,7 +192,7 @@ export function assertExecutionCandidate(value: unknown): asserts value is Execu
     if (!PRIVACY.has(value.privacy.boundary as PrivacyBoundary)) issues.push('privacy.boundary is unsupported')
     if (!TRAINING.has(value.privacy.trainingUse as TrainingUse)) issues.push('privacy.trainingUse is unsupported')
     if (value.privacy.dataResidency !== undefined && !stringList(value.privacy.dataResidency)) issues.push('privacy.dataResidency must contain unique public non-empty values')
-    if (value.privacy.retention !== undefined && !publicText(value.privacy.retention)) issues.push('privacy.retention must be public non-empty text when present')
+    if (!nonNegativeIntegerOrNull(value.privacy.retentionDays)) issues.push('privacy.retentionDays must be a non-negative safe integer or null')
   }
 
   if (!isObject(value.tools)) issues.push('tools must be an object')
@@ -258,7 +262,7 @@ function cloneCandidate(candidate: ExecutionCandidate): ExecutionCandidate {
       boundary: candidate.privacy.boundary,
       ...(candidate.privacy.dataResidency ? { dataResidency: [...candidate.privacy.dataResidency] } : {}),
       trainingUse: candidate.privacy.trainingUse,
-      ...(candidate.privacy.retention ? { retention: candidate.privacy.retention } : {})
+      retentionDays: candidate.privacy.retentionDays
     },
     tools: {
       mode: candidate.tools.mode,
